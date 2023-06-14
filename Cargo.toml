@@ -1,0 +1,23 @@
+[package]
+name = "simple-completion-language-server"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "simple-completion-language-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+ropey = "1.6"
+aho-corasick = "1.0"
+tokio = { version = "1.28", features = ["rt", "rt-multi-thread", "io-std", "macros"] }
+tower-lsp = { version = "0.19", features = ["runtime-tokio"] }
+serde = { version = "1", features = ["serde_derive"] }
+serde_json = { version = "1" }
+
+tracing = "0.1"
+tracing-subscriber = { version =  "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2" 
+
+
