@@ -142,6 +142,11 @@ impl BackendState {
                 return Ok(HashSet::new());
             }
 
+            let len_chars = text.len_chars();
+            if start_offset > len_chars || cursor > len_chars {
+                anyhow::bail!("bounds error")
+            }
+
             let prefix = text.slice(start_offset..cursor).to_string();
 
             // prepare search pattern
@@ -151,7 +156,12 @@ impl BackendState {
                 .map_err(|e| anyhow::anyhow!("error {e}"))?;
 
             for (url, text) in &self.docs {
-                tracing::debug!("Try complete prefix {} by doc {}", prefix, url.as_str());
+                let len_chars = text.len_chars();
+                tracing::debug!(
+                    "Try complete prefix {} by doc {} (chars: {len_chars})",
+                    prefix,
+                    url.as_str()
+                );
 
                 let searcher = ac.try_stream_find_iter(RopeReader::new(text))?;
 
@@ -162,6 +172,11 @@ impl BackendState {
                         .skip(mat.end())
                         .take_while(|ch| char_is_word(*ch))
                         .count();
+
+                    if mat.end() + word_end > len_chars {
+                        continue;
+                    }
+
                     let item = text.slice(mat.start()..(mat.end() + word_end));
                     if item != prefix {
                         result.insert(item.to_string());
