@@ -16,6 +16,10 @@ tower-lsp = { version = "0.19", features = ["runtime-tokio"] }
 serde = { version = "1", features = ["serde_derive"] }
 serde_json = { version = "1" }
 
+# snippets
+toml = "0.7"
+etcetera = "0.8"
+
 tracing = "0.1"
 tracing-subscriber = { version =  "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2" 

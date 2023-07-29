@@ -1,11 +1,23 @@
 use aho_corasick::AhoCorasick;
 use anyhow::Result;
+use etcetera::base_strategy::{choose_base_strategy, BaseStrategy};
 use ropey::Rope;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::io::prelude::*;
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::lsp_types::*;
+
+pub mod snippets;
+
+use snippets::{Snippet, SnippetsConfig};
+
+pub fn config_dir() -> std::path::PathBuf {
+    let strategy = choose_base_strategy().expect("Unable to find the config directory!");
+    let mut path = strategy.config_dir();
+    path.push("helix");
+    path
+}
 
 #[derive(Deserialize)]
 pub struct BackendSettings {
@@ -64,14 +76,41 @@ pub enum BackendResponse {
     CompletionResponse(CompletionResponse),
 }
 
+pub struct Document {
+    uri: Url,
+    text: Rope,
+    language_id: String,
+}
+
 pub struct BackendState {
     settings: BackendSettings,
-    docs: HashMap<Url, Rope>,
+    docs: HashMap<Url, Document>,
+    snippets: HashMap<String, Snippet>,
     rx: mpsc::UnboundedReceiver<BackendRequest>,
 }
 
 impl BackendState {
-    pub async fn new() -> (mpsc::UnboundedSender<BackendRequest>, Self) {
+    pub async fn new(
+        snippets_file: &std::path::PathBuf,
+    ) -> (mpsc::UnboundedSender<BackendRequest>, Self) {
+        tracing::info!("Try load snippets from: {snippets_file:?}");
+        let snippets = match std::fs::read_to_string(snippets_file) {
+            Ok(content) => match toml::from_str::<SnippetsConfig>(&content) {
+                Ok(sc) => {
+                    HashMap::from_iter(sc.snippets.into_iter().map(|s| (s.prefix.clone(), s)))
+                }
+                Err(e) => {
+                    tracing::error!("Failed to parse {snippets_file:?}: {e}");
+                    HashMap::new()
+                }
+            },
+
+            Err(e) => {
+                tracing::warn!("Failed to read snippets: {e}");
+                HashMap::new()
+            }
+        };
+
         let (request_tx, request_rx) = mpsc::unbounded_channel::<BackendRequest>();
 
         (
@@ -79,35 +118,42 @@ impl BackendState {
             BackendState {
                 settings: BackendSettings::default(),
                 docs: HashMap::new(),
+                snippets,
                 rx: request_rx,
             },
         )
     }
 
     fn change_doc(&mut self, params: DidChangeTextDocumentParams) -> Result<()> {
-        if let Some(text) = self.docs.get_mut(&params.text_document.uri) {
+        if let Some(doc) = self.docs.get_mut(&params.text_document.uri) {
             for change in params.content_changes {
                 let Some(range) = change.range else {
                     continue
                 };
-                let start_idx = text
+                let start_idx = doc
+                    .text
                     .try_line_to_char(range.start.line as usize)
                     .map(|idx| idx + range.start.character as usize);
-                let end_idx = text
+                let end_idx = doc
+                    .text
                     .try_line_to_char(range.end.line as usize)
                     .map(|idx| idx + range.end.character as usize);
 
                 match (start_idx, end_idx) {
                     (Ok(start_idx), Err(_)) => {
-                        text.remove(start_idx..);
-                        text.insert(start_idx, &change.text);
+                        doc.text.remove(start_idx..);
+                        doc.text.insert(start_idx, &change.text);
                     }
                     (Ok(start_idx), Ok(end_idx)) => {
-                        text.remove(start_idx..end_idx);
-                        text.insert(start_idx, &change.text);
+                        doc.text.remove(start_idx..end_idx);
+                        doc.text.insert(start_idx, &change.text);
                     }
                     (Err(_), _) => {
-                        *text = Rope::from(change.text);
+                        *doc = Document {
+                            uri: doc.uri.clone(),
+                            text: Rope::from(change.text),
+                            language_id: doc.language_id.clone(),
+                        }
                     }
                 }
             }
@@ -121,72 +167,103 @@ impl BackendState {
         Ok(())
     }
 
-    fn completion(&self, params: CompletionParams) -> Result<HashSet<String>> {
-        let mut result: HashSet<String> = HashSet::new();
-        if let Some(text) = self
+    fn get_prefix(&self, params: CompletionParams) -> Result<(Option<&str>, &Document)> {
+        let Some(doc) = self
             .docs
             .get(&params.text_document_position.text_document.uri)
-        {
-            // word prefix
-            let cursor = text
-                .try_line_to_char(params.text_document_position.position.line as usize)?
-                + params.text_document_position.position.character as usize;
-            let mut iter = text
-                .get_chars_at(cursor)
-                .ok_or_else(|| anyhow::anyhow!("bounds error"))?;
-            iter.reverse();
-            let offset = iter.take_while(|ch| char_is_word(*ch)).count();
-            let start_offset = cursor.saturating_sub(offset);
+        else {
+            anyhow::bail!("Document {} not found", params.text_document_position.text_document.uri)
+        };
 
-            if cursor == start_offset {
-                return Ok(HashSet::new());
+        // word prefix
+        let cursor = doc
+            .text
+            .try_line_to_char(params.text_document_position.position.line as usize)?
+            + params.text_document_position.position.character as usize;
+        let mut iter = doc
+            .text
+            .get_chars_at(cursor)
+            .ok_or_else(|| anyhow::anyhow!("bounds error"))?;
+        iter.reverse();
+        let offset = iter.take_while(|ch| char_is_word(*ch)).count();
+        let start_offset = cursor.saturating_sub(offset);
+
+        if cursor == start_offset {
+            return Ok((None, doc));
+        }
+
+        let len_chars = doc.text.len_chars();
+        if start_offset > len_chars || cursor > len_chars {
+            anyhow::bail!("bounds error")
+        }
+
+        let prefix = doc.text.slice(start_offset..cursor).as_str();
+        Ok((prefix, doc))
+    }
+
+    fn search(
+        &self,
+        ac: &AhoCorasick,
+        prefix: &str,
+        doc: &Document,
+        to_take: usize,
+    ) -> Result<HashSet<String>> {
+        let mut result: HashSet<String> = HashSet::new();
+        let len_chars = doc.text.len_chars();
+
+        let searcher = ac.try_stream_find_iter(RopeReader::new(&doc.text))?;
+
+        for mat in searcher.take(to_take) {
+            let mat = mat?;
+            let word_end = doc
+                .text
+                .chars()
+                .skip(mat.end())
+                .take_while(|ch| char_is_word(*ch))
+                .count();
+
+            if mat.end() + word_end > len_chars {
+                continue;
             }
 
-            let len_chars = text.len_chars();
-            if start_offset > len_chars || cursor > len_chars {
-                anyhow::bail!("bounds error")
-            }
-
-            let prefix = text.slice(start_offset..cursor).to_string();
-
-            // prepare search pattern
-            let ac = AhoCorasick::builder()
-                .ascii_case_insensitive(true)
-                .build([&prefix])
-                .map_err(|e| anyhow::anyhow!("error {e}"))?;
-
-            for (url, text) in &self.docs {
-                let len_chars = text.len_chars();
-                tracing::debug!(
-                    "Try complete prefix {} by doc {} (chars: {len_chars})",
-                    prefix,
-                    url.as_str()
-                );
-
-                let searcher = ac.try_stream_find_iter(RopeReader::new(text))?;
-
-                for mat in searcher.take(self.settings.max_completion_items) {
-                    let mat = mat?;
-                    let word_end = text
-                        .chars()
-                        .skip(mat.end())
-                        .take_while(|ch| char_is_word(*ch))
-                        .count();
-
-                    if mat.end() + word_end > len_chars {
-                        continue;
-                    }
-
-                    let item = text.slice(mat.start()..(mat.end() + word_end));
-                    if item != prefix {
-                        result.insert(item.to_string());
-                        if result.len() >= self.settings.max_completion_items {
-                            return Ok(result);
-                        }
-                    }
+            let item = doc.text.slice(mat.start()..(mat.end() + word_end));
+            if item != prefix {
+                result.insert(item.to_string());
+                if result.len() >= self.settings.max_completion_items {
+                    return Ok(result);
                 }
             }
         }
+
+        Ok(result)
+    }
+
+    fn completion(&self, prefix: &str, current_doc: &Document) -> Result<HashSet<String>> {
+        // prepare search pattern
+        let ac = AhoCorasick::builder()
+            .ascii_case_insensitive(true)
+            .build([&prefix])
+            .map_err(|e| anyhow::anyhow!("error {e}"))?;
+
+        // search in current doc at first
+        let mut result =
+            self.search(&ac, prefix, current_doc, self.settings.max_completion_items)?;
+        if result.len() >= self.settings.max_completion_items {
+            return Ok(result);
+        }
+
+        for doc in self.docs.values().filter(|doc| doc.uri != current_doc.uri) {
+            result.extend(self.search(
+                &ac,
+                prefix,
+                doc,
+                self.settings.max_completion_items - result.len(),
+            )?);
+            if result.len() >= self.settings.max_completion_items {
+                return Ok(result);
+            }
+        }
+
         Ok(result)
     }
 
@@ -199,8 +276,12 @@ impl BackendState {
             match cmd {
                 BackendRequest::NewDoc(params) => {
                     self.docs.insert(
-                        params.text_document.uri,
-                        Rope::from_str(&params.text_document.text),
+                        params.text_document.uri.clone(),
+                        Document {
+                            uri: params.text_document.uri,
+                            text: Rope::from_str(&params.text_document.text),
+                            language_id: params.text_document.language_id,
+                        },
                     );
                 }
                 BackendRequest::ChangeDoc(params) => {
@@ -216,25 +297,73 @@ impl BackendState {
                 BackendRequest::CompletionRequest((tx, params)) => {
                     let now = std::time::Instant::now();
 
-                    let response = self.completion(params).map(|result| {
-                        tracing::info!(
-                            "completion request took {:.2}ms with {} result items",
-                            now.elapsed().as_millis(),
-                            result.len(),
-                        );
-                        BackendResponse::CompletionResponse(CompletionResponse::Array(
-                            result
-                                .into_iter()
-                                .map(|word| CompletionItem {
-                                    label: word,
-                                    kind: Some(CompletionItemKind::TEXT),
-                                    ..Default::default()
-                                })
-                                .collect(),
-                        ))
-                    });
+                    let Ok((prefix, doc)) = self.get_prefix(params) else {
+                        if tx.send(Err(anyhow::anyhow!("Failed to get prefix"))).is_err() {
+                            tracing::error!("Error on send completion response");
+                        }
+                        continue
+                    };
 
-                    if tx.send(response).is_err() {
+                    let Some(prefix) = prefix else {
+                        let response = Ok(BackendResponse::CompletionResponse(CompletionResponse::Array(Vec::new())));
+                        if tx.send(response).is_err() {
+                            tracing::error!("Error on send completion response");
+                        }
+                        continue
+                    };
+
+                    // words
+                    let words = match self.completion(prefix, doc) {
+                        Ok(words) => {
+                            tracing::info!(
+                                "completion request took {:.2}ms with {} result items",
+                                now.elapsed().as_millis(),
+                                words.len(),
+                            );
+
+                            words.into_iter().map(|word| CompletionItem {
+                                label: word,
+                                kind: Some(CompletionItemKind::TEXT),
+                                ..Default::default()
+                            })
+                        }
+
+                        Err(e) => {
+                            tracing::error!("On completion request: {e}");
+
+                            if tx.send(Err(e)).is_err() {
+                                tracing::error!("Error on send completion response");
+                            }
+                            continue;
+                        }
+                    };
+
+                    // snippets
+                    let snippets = self
+                        .snippets
+                        .iter()
+                        .filter(|(p, s)| {
+                            p.starts_with(prefix)
+                                & (s.scope.is_empty() | s.scope.contains(&doc.language_id))
+                        })
+                        .map(|(p, s)| CompletionItem {
+                            label: p.to_owned(),
+                            kind: Some(CompletionItemKind::SNIPPET),
+                            detail: Some(if let Some(description) = &s.description {
+                                format!("{description}\n{}", s.body)
+                            } else {
+                                s.body.to_string()
+                            }),
+                            insert_text: Some(s.body.to_string()),
+                            insert_text_format: Some(InsertTextFormat::SNIPPET),
+                            ..Default::default()
+                        });
+
+                    let response = BackendResponse::CompletionResponse(CompletionResponse::Array(
+                        words.chain(snippets).collect(),
+                    ));
+
+                    if tx.send(Ok(response)).is_err() {
                         tracing::error!("Error on send completion response");
                     }
                 }

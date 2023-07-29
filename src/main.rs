@@ -4,7 +4,9 @@ use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-use simple_completion_language_server::{BackendRequest, BackendResponse, BackendState};
+use simple_completion_language_server::{
+    config_dir, BackendRequest, BackendResponse, BackendState,
+};
 
 #[derive(Debug)]
 struct Backend {
@@ -124,7 +126,14 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (tx, backend_state) = BackendState::new().await;
+    let snippets_file = std::env::var("SNIPPETS_FILE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            let mut filepath = config_dir();
+            filepath.push("snippets.toml");
+            filepath
+        });
+    let (tx, backend_state) = BackendState::new(&snippets_file).await;
 
     let task = tokio::spawn(backend_state.start());
 

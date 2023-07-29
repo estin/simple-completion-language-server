@@ -1,6 +1,6 @@
 <div align="center">
   <p><h1>simple-completion-language-server</h1> </p>
-  <p><strong>Allow to use common word completion for <a href="https://helix-editor.com/">Helix editor</a></strong></p>
+  <p><strong>Allow to use common word completion and snippets for <a href="https://helix-editor.com/">Helix editor</a></strong></p>
   <p></p>
 </div>
 
@@ -19,7 +19,7 @@ Configure Helix on ~/.config/helix/languages.toml
 # - set max completion results len to 20
 # - write logs to /tmp/completion.log
 [language-server]
-simple-completion-language-server = { command = "simple-completion-language-server", config = { "max_completion_items" = 20 }, environment = { "RUST_LOG" = "debug,simple-completion-langauge-server=debug",  "LOG_FILE" = "/tmp/completion.log" } }
+scls = { command = "simple-completion-language-server", config = { "max_completion_items" = 20 }, environment = { "RUST_LOG" = "debug,simple-completion-langauge-server=debug",  "LOG_FILE" = "/tmp/completion.log" } }
 
 # introduce new language to enable completion
 # :set-language stub
@@ -30,32 +30,46 @@ file-types = []
 shebangs = []
 roots = []
 auto-format = false
-language-servers = [ "simple-completion-language-server" ]
+language-servers = [ "scls" ]
 
 # append langage server to existed languages
 [[language]]
 name = "rust"
-language-servers = [ "simple-completion-language-server", "rust-analyzer" ]
+language-servers = [ "scls", "rust-analyzer" ]
 
 [[language]]
 name = "markdown"
-language-servers = [ "simple-completion-language-server", "marksman" ]
+language-servers = [ "scls", "marksman" ]
 
 [[language]]
 name = "html"
-language-servers = [ "simple-completion-language-server", "vscode-html-language-server" ]
+language-servers = [ "scls", "vscode-html-language-server" ]
 
 [[language]]
 name = "toml"
-language-servers = [ "simple-completion-language-server", "taplo" ]
+language-servers = [ "scls", "taplo" ]
 
 [[language]]
 name = "dockerfile"
-language-servers = [ "simple-completion-language-server", "docker-langserver" ]
+language-servers = [ "scls", "docker-langserver" ]
 
 [[language]]
 name = "git-commit"
-language-servers = [ "simple-completion-language-server" ]
+language-servers = [ "scls" ]
 
 # etc..
+```
+
+Add snippets to  ~/.config/helix/snippets.toml
+```toml
+[[snippets]]
+prefix = "author"            # prefix to trigger snippet
+scope = []                   # list of language_id
+body = "Evgeniy Tatarkin"    # snippet
+description = "Author"       # (optional) description
+
+[[snippets]]
+prefix = "ld"
+scope = [ "python" ]
+body = 'log.debug("$1")'
 ```
