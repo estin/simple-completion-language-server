@@ -348,7 +348,11 @@ impl BackendState {
                         .iter()
                         .filter(|(p, s)| {
                             p.starts_with(prefix)
-                                & (s.scope.is_empty() | s.scope.contains(&doc.language_id))
+                                && if let Some(scope) = &s.scope {
+                                    scope.is_empty() | scope.contains(&doc.language_id)
+                                } else {
+                                    true
+                                }
                         })
                         .map(|(p, s)| CompletionItem {
                             label: p.to_owned(),

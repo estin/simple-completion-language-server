@@ -7,7 +7,7 @@ pub struct SnippetsConfig {
 
 #[derive(Deserialize)]
 pub struct Snippet {
-    pub scope: Vec<String>,
+    pub scope: Option<Vec<String>>,
     pub prefix: String,
     pub body: String,
     pub description: Option<String>,

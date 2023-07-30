@@ -64,7 +64,6 @@ Add snippets to  ~/.config/helix/snippets.toml
 ```toml
 [[snippets]]
 prefix = "author"            # prefix to trigger snippet
-scope = []                   # list of language_id
 body = "Evgeniy Tatarkin"    # snippet
 description = "Author"       # (optional) description
 
