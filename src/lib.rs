@@ -209,24 +209,28 @@ impl BackendState {
         to_take: usize,
     ) -> Result<HashSet<String>> {
         let mut result: HashSet<String> = HashSet::new();
-        let len_chars = doc.text.len_chars();
+        let len_bytes = doc.text.len_bytes();
 
         let searcher = ac.try_stream_find_iter(RopeReader::new(&doc.text))?;
 
         for mat in searcher.take(to_take) {
             let mat = mat?;
+            let mat_end = doc.text.byte_to_char(mat.end());
+
             let word_end = doc
                 .text
                 .chars()
-                .skip(mat.end())
+                .skip(mat_end)
                 .take_while(|ch| char_is_word(*ch))
                 .count();
 
-            if mat.end() + word_end > len_chars {
+            let word_end = doc.text.char_to_byte(mat_end + word_end);
+
+            if word_end > len_bytes {
                 continue;
             }
 
-            let item = doc.text.slice(mat.start()..(mat.end() + word_end));
+            let item = doc.text.byte_slice(mat.start()..word_end);
             if item != prefix {
                 result.insert(item.to_string());
                 if result.len() >= self.settings.max_completion_items {
