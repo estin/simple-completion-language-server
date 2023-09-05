@@ -10,7 +10,7 @@ use tower_lsp::lsp_types::*;
 
 pub mod snippets;
 
-use snippets::{Snippet, SnippetsConfig};
+use snippets::{Snippet, SnippetsConfig, VSSnippetsConfig};
 
 pub fn config_dir() -> std::path::PathBuf {
     let strategy = choose_base_strategy().expect("Unable to find the config directory!");
@@ -85,33 +85,82 @@ pub struct Document {
 pub struct BackendState {
     settings: BackendSettings,
     docs: HashMap<Url, Document>,
-    snippets: HashMap<String, Snippet>,
+    snippets: Vec<Snippet>,
     rx: mpsc::UnboundedReceiver<BackendRequest>,
 }
 
 impl BackendState {
     pub async fn new(
-        snippets_file: &std::path::PathBuf,
+        snippets_path: &std::path::PathBuf,
     ) -> (mpsc::UnboundedSender<BackendRequest>, Self) {
-        tracing::info!("Try load snippets from: {snippets_file:?}");
-        let snippets = match std::fs::read_to_string(snippets_file) {
-            Ok(content) => match toml::from_str::<SnippetsConfig>(&content) {
-                Ok(sc) => {
-                    HashMap::from_iter(sc.snippets.into_iter().map(|s| (s.prefix.clone(), s)))
-                }
-                Err(e) => {
-                    tracing::error!("Failed to parse {snippets_file:?}: {e}");
-                    HashMap::new()
-                }
-            },
+        tracing::info!("Try load snippets from: {snippets_path:?}");
 
-            Err(e) => {
-                tracing::warn!("Failed to read snippets: {e}");
-                HashMap::new()
+        let mut snippets = Vec::new();
+        if snippets_path.is_dir() {
+            match std::fs::read_dir(snippets_path) {
+                Ok(entries) => {
+                    for entry in entries {
+                        let Ok(entry) = entry else {
+                            continue
+                        };
+
+                        let path = entry.path();
+                        if path.is_dir() {
+                            continue;
+                        };
+
+                        let scope = path
+                            .file_stem()
+                            .and_then(|v| v.to_str())
+                            .filter(|v| *v != "snippets")
+                            .map(|v| vec![v.to_string()]);
+
+                        tracing::info!("Try load snippets from: {path:?} for scope: {scope:?}");
+
+                        let Ok(content) = std::fs::read_to_string(&path) else {
+                            tracing::warn!("Failed to read snippets: {path:?}");
+                            continue;
+                        };
+
+                        let result = match path.extension().and_then(|v| v.to_str()) {
+                            Some("toml") => toml::from_str::<SnippetsConfig>(&content)
+                                .map(|sc| sc.snippets)
+                                .map_err(|e| anyhow::anyhow!(e)),
+                            Some("json") => serde_json::from_str::<VSSnippetsConfig>(&content)
+                                .map(|s| s.snippets.into_values().map(Snippet::from).collect())
+                                .map_err(|e| anyhow::anyhow!(e)),
+                            _ => {
+                                tracing::warn!("Unsupported snipptes format: {path:?}");
+                                continue;
+                            }
+                        };
+
+                        match result {
+                            Ok(sc) => {
+                                snippets.extend(sc.into_iter().map(|mut s| {
+                                    // inject scope
+                                    if s.scope.is_none() {
+                                        s.scope = scope.to_owned();
+                                    }
+
+                                    s
+                                }));
+                            }
+
+                            Err(e) => {
+                                tracing::warn!("Failed to parse {path:?}: {e}");
+                                continue;
+                            }
+                        }
+                    }
+                }
+                Err(e) => tracing::error!("On read dir {snippets_path:?}: {e}"),
             }
         };
 
         let (request_tx, request_rx) = mpsc::unbounded_channel::<BackendRequest>();
+
+        tracing::info!("Snippets are: {snippets:#?}");
 
         (
             request_tx,
@@ -346,16 +395,16 @@ impl BackendState {
                     let snippets = self
                         .snippets
                         .iter()
-                        .filter(|(p, s)| {
-                            p.starts_with(prefix)
+                        .filter(|s| {
+                            s.prefix.starts_with(prefix)
                                 && if let Some(scope) = &s.scope {
                                     scope.is_empty() | scope.contains(&doc.language_id)
                                 } else {
                                     true
                                 }
                         })
-                        .map(|(p, s)| CompletionItem {
-                            label: p.to_owned(),
+                        .map(|s| CompletionItem {
+                            label: s.prefix.to_owned(),
                             kind: Some(CompletionItemKind::SNIPPET),
                             detail: Some(if let Some(description) = &s.description {
                                 format!("{description}\n{}", s.body)

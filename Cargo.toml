@@ -11,8 +11,8 @@ path = "src/main.rs"
 anyhow = "1.0"
 ropey = "1.6"
 aho-corasick = "1.0"
-tokio = { version = "1.28", features = ["rt", "rt-multi-thread", "io-std", "macros"] }
-tower-lsp = { version = "0.19", features = ["runtime-tokio"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "io-std", "macros"] }
+tower-lsp = { version = "0.20", features = ["runtime-tokio"] }
 serde = { version = "1", features = ["serde_derive"] }
 serde_json = { version = "1" }
 

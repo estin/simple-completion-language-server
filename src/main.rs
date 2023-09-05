@@ -126,14 +126,14 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let snippets_file = std::env::var("SNIPPETS_FILE")
+    let snippets_path = std::env::var("SNIPPETS_PATH")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|_| {
             let mut filepath = config_dir();
-            filepath.push("snippets.toml");
+            filepath.push("snippets");
             filepath
         });
-    let (tx, backend_state) = BackendState::new(&snippets_file).await;
+    let (tx, backend_state) = BackendState::new(&snippets_path).await;
 
     let task = tokio::spawn(backend_state.start());
 

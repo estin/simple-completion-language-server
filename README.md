@@ -5,7 +5,8 @@
 </div>
 
 
-Install (from source only)
+### Install (from source only)
+
 ```bash
 $ git clone https://github.com/estin/simple-completion-language-server.git
 $ cd simple-completion-language-server
@@ -13,7 +14,10 @@ $ cargo install --path .
 ```
 
 
-Configure Helix on ~/.config/helix/languages.toml
+### Configure
+
+For Helix on ~/.config/helix/languages.toml
+
 ```toml
 # introudce new language server
 # - set max completion results len to 20
@@ -60,7 +64,20 @@ language-servers = [ "scls" ]
 # etc..
 ```
 
-Add snippets to  ~/.config/helix/snippets.toml
+
+### Snippets
+
+Read snippets from dir `~/.config/helix/snippets` or specify snippets path via `SNIPPETS_PATH` env.
+
+Currently supports our own `toml` format and vscode `json` (a basic effort)
+
+Filename used as snippet scope (language), filename `snippets.(toml|json)` will not attach scope to snippets.
+
+For example, snippets with filename `python.toml` or `python.json` would have a `python` scope.
+
+Snippets format
+
+
 ```toml
 [[snippets]]
 prefix = "author"            # prefix to trigger snippet
