@@ -21,9 +21,15 @@ For Helix on ~/.config/helix/languages.toml
 ```toml
 # introudce new language server
 # - set max completion results len to 20
-# - write logs to /tmp/completion.log
-[language-server]
-scls = { command = "simple-completion-language-server", config = { "max_completion_items" = 20 }, environment = { "RUST_LOG" = "debug,simple-completion-langauge-server=debug",  "LOG_FILE" = "/tmp/completion.log" } }
+# - completions will return before snippets by default
+[language-server.scls]
+command = "simple-completion-language-server"
+config = { max_completion_items = 20, snippets_first = false }
+
+# write logs to /tmp/completion.log
+[language-server.scls.environment]
+RUST_LOG = "debug,simple-completion-langauge-server=debug"
+LOG_FILE = "/tmp/completion.log"
 
 # introduce new language to enable completion
 # :set-language stub

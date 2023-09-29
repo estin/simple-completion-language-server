@@ -22,12 +22,14 @@ pub fn config_dir() -> std::path::PathBuf {
 #[derive(Deserialize)]
 pub struct BackendSettings {
     pub max_completion_items: usize,
+    pub snippets_first: bool,
 }
 
 impl Default for BackendSettings {
     fn default() -> Self {
         BackendSettings {
             max_completion_items: 20,
+            snippets_first: false,
         }
     }
 }
@@ -416,9 +418,13 @@ impl BackendState {
                             ..Default::default()
                         });
 
-                    let response = BackendResponse::CompletionResponse(CompletionResponse::Array(
-                        words.chain(snippets).collect(),
-                    ));
+                    let results = if self.settings.snippets_first {
+                        snippets.chain(words).collect()
+                    } else {
+                        words.chain(snippets).collect()
+                    };
+                    let response =
+                        BackendResponse::CompletionResponse(CompletionResponse::Array(results));
 
                     if tx.send(Ok(response)).is_err() {
                         tracing::error!("Error on send completion response");
