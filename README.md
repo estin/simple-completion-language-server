@@ -95,3 +95,12 @@ prefix = "ld"
 scope = [ "python" ]
 body = 'log.debug("$1")'
 ```
+
+
+### Similar projects
+
+- [metafates/buffer-language-server](https://github.com/metafates/buffer-language-server)
+- [rajasegar/helix-snippets-ls](https://github.com/rajasegar/helix-snippets-ls)
+- [quantonganh/snippets-ls](https://github.com/quantonganh/snippets-ls)
+- [Stanislav-Lapata/snippets-ls](https://github.com/Stanislav-Lapata/snippets-ls)
+- ...(please add another useful links here)
