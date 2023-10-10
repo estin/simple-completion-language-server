@@ -102,9 +102,7 @@ impl BackendState {
             match std::fs::read_dir(snippets_path) {
                 Ok(entries) => {
                     for entry in entries {
-                        let Ok(entry) = entry else {
-                            continue
-                        };
+                        let Ok(entry) = entry else { continue };
 
                         let path = entry.path();
                         if path.is_dir() {
@@ -129,10 +127,15 @@ impl BackendState {
                                 .map(|sc| sc.snippets)
                                 .map_err(|e| anyhow::anyhow!(e)),
                             Some("json") => serde_json::from_str::<VSSnippetsConfig>(&content)
-                                .map(|s| s.snippets.into_values().map(Snippet::from).collect())
+                                .map(|s| {
+                                    s.snippets
+                                        .into_values()
+                                        .flat_map(Into::<Vec<Snippet>>::into)
+                                        .collect()
+                                })
                                 .map_err(|e| anyhow::anyhow!(e)),
                             _ => {
-                                tracing::warn!("Unsupported snipptes format: {path:?}");
+                                tracing::error!("Unsupported snipptes format: {path:?}");
                                 continue;
                             }
                         };
@@ -150,7 +153,7 @@ impl BackendState {
                             }
 
                             Err(e) => {
-                                tracing::warn!("Failed to parse {path:?}: {e}");
+                                tracing::error!("Failed to parse {path:?}: {e}");
                                 continue;
                             }
                         }
@@ -161,8 +164,6 @@ impl BackendState {
         };
 
         let (request_tx, request_rx) = mpsc::unbounded_channel::<BackendRequest>();
-
-        tracing::info!("Snippets are: {snippets:#?}");
 
         (
             request_tx,
@@ -178,9 +179,7 @@ impl BackendState {
     fn change_doc(&mut self, params: DidChangeTextDocumentParams) -> Result<()> {
         if let Some(doc) = self.docs.get_mut(&params.text_document.uri) {
             for change in params.content_changes {
-                let Some(range) = change.range else {
-                    continue
-                };
+                let Some(range) = change.range else { continue };
                 let start_idx = doc
                     .text
                     .try_line_to_char(range.start.line as usize)
@@ -223,7 +222,10 @@ impl BackendState {
             .docs
             .get(&params.text_document_position.text_document.uri)
         else {
-            anyhow::bail!("Document {} not found", params.text_document_position.text_document.uri)
+            anyhow::bail!(
+                "Document {} not found",
+                params.text_document_position.text_document.uri
+            )
         };
 
         // word prefix
@@ -325,7 +327,7 @@ impl BackendState {
     pub async fn start(mut self) {
         loop {
             let Some(cmd) = self.rx.recv().await else {
-                continue
+                continue;
             };
 
             match cmd {
@@ -353,18 +355,23 @@ impl BackendState {
                     let now = std::time::Instant::now();
 
                     let Ok((prefix, doc)) = self.get_prefix(params) else {
-                        if tx.send(Err(anyhow::anyhow!("Failed to get prefix"))).is_err() {
+                        if tx
+                            .send(Err(anyhow::anyhow!("Failed to get prefix")))
+                            .is_err()
+                        {
                             tracing::error!("Error on send completion response");
                         }
-                        continue
+                        continue;
                     };
 
                     let Some(prefix) = prefix else {
-                        let response = Ok(BackendResponse::CompletionResponse(CompletionResponse::Array(Vec::new())));
+                        let response = Ok(BackendResponse::CompletionResponse(
+                            CompletionResponse::Array(Vec::new()),
+                        ));
                         if tx.send(response).is_err() {
                             tracing::error!("Error on send completion response");
                         }
-                        continue
+                        continue;
                     };
 
                     // words
