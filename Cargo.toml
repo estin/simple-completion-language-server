@@ -19,6 +19,7 @@ serde_json = { version = "1" }
 # snippets
 toml = "0.7"
 etcetera = "0.8"
+xshell = "0.2.5"
 
 tracing = "0.1"
 tracing-subscriber = { version =  "0.3", features = ["env-filter", "fmt"] }

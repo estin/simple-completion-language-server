@@ -659,6 +659,7 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "xshell",
 ]
 
 [[package]]
@@ -1102,3 +1103,18 @@ checksum = "7c2e3184b9c4e92ad5167ca73039d0c42476302ab603e2fec4487511f38ccefc"
 dependencies = [
  "memchr",
 ]
+
+[[package]]
+name = "xshell"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce2107fe03e558353b4c71ad7626d58ed82efaf56c54134228608893c77023ad"
+dependencies = [
+ "xshell-macros",
+]
+
+[[package]]
+name = "xshell-macros"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7e2c411759b501fb9501aac2b1b2d287a6e93e5bdcf13c25306b23e1b716dd0e"

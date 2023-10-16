@@ -1,18 +1,6 @@
+use crate::Snippet;
 use serde::Deserialize;
 use std::collections::HashMap;
-
-#[derive(Deserialize)]
-pub struct SnippetsConfig {
-    pub snippets: Vec<Snippet>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Snippet {
-    pub scope: Option<Vec<String>>,
-    pub prefix: String,
-    pub body: String,
-    pub description: Option<String>,
-}
 
 #[derive(Deserialize)]
 pub struct VSSnippetsConfig {
@@ -28,11 +16,31 @@ pub enum VSCodeSnippetPrefix {
 }
 
 #[derive(Deserialize)]
+#[serde(untagged)]
+pub enum VSCodeSnippetBody {
+    Single(String),
+    List(Vec<String>),
+}
+
+#[derive(Deserialize)]
 pub struct VSCodeSnippet {
     pub scope: Option<String>,
     pub prefix: VSCodeSnippetPrefix,
-    pub body: Vec<String>,
+    pub body: VSCodeSnippetBody,
     pub description: Option<String>,
+}
+
+impl std::fmt::Display for VSCodeSnippetBody {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                VSCodeSnippetBody::Single(v) => v.to_owned(),
+                VSCodeSnippetBody::List(v) => v.join("\n"),
+            }
+        )
+    }
 }
 
 impl From<VSCodeSnippet> for Vec<Snippet> {
@@ -40,7 +48,7 @@ impl From<VSCodeSnippet> for Vec<Snippet> {
         let scope = value
             .scope
             .map(|v| v.split(',').map(String::from).collect());
-        let body = value.body.join("\n");
+        let body = value.body.to_string();
 
         match value.prefix {
             VSCodeSnippetPrefix::Single(prefix) => {

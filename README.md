@@ -70,6 +70,34 @@ scope = [ "python" ]
 body = 'log.debug("$1")'
 ```
 
+### Use external snippets collections from git repos
+
+Configure sources in `~/.config/helix/external-snippets.toml` (or via env `EXTERNAL_SNIPPETS_CONFIG`)
+
+```toml
+[[sources]] # list of sources to load
+name = "friendly-snippets"  # optional name shown on snippet description
+git = "https://github.com/rafamadriz/friendly-snippets.git" # git repot with snippets collections
+
+[[sources.paths]] # list of paths to load on current source
+scope = ["python"]  # optional scopes for current snippets
+path = "snippets/python/python.json"  # where snippet file located in repo
+```
+
+
+Clone or update snippets source repos to `~/.config/helix/external-snippets/<repo path>``
+
+```bash
+$ simple-completion-language-server fetch-external-snippets
+```
+
+
+Validate snippets
+
+```bash
+$ simple-completion-language-server validate-snippets
+```
+
 
 ### Similar projects
 
@@ -77,4 +105,8 @@ body = 'log.debug("$1")'
 - [rajasegar/helix-snippets-ls](https://github.com/rajasegar/helix-snippets-ls)
 - [quantonganh/snippets-ls](https://github.com/quantonganh/snippets-ls)
 - [Stanislav-Lapata/snippets-ls](https://github.com/Stanislav-Lapata/snippets-ls)
+- ...(please add another useful links here)
+
+### Useful snippets collections
+- [rafamadriz/friendly-snippets](https://github.com/rafamadriz/friendly-snippets)
 - ...(please add another useful links here)
