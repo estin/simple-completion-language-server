@@ -85,7 +85,7 @@ path = "snippets/python/python.json"  # where snippet file located in repo
 ```
 
 
-Clone or update snippets source repos to `~/.config/helix/external-snippets/<repo path>``
+Clone or update snippets source repos to `~/.config/helix/external-snippets/<repo path>`
 
 ```bash
 $ simple-completion-language-server fetch-external-snippets
@@ -108,5 +108,6 @@ $ simple-completion-language-server validate-snippets
 - ...(please add another useful links here)
 
 ### Useful snippets collections
+
 - [rafamadriz/friendly-snippets](https://github.com/rafamadriz/friendly-snippets)
 - ...(please add another useful links here)
