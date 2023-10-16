@@ -77,11 +77,11 @@ Configure sources in `~/.config/helix/external-snippets.toml` (or via env `EXTER
 ```toml
 [[sources]] # list of sources to load
 name = "friendly-snippets"  # optional name shown on snippet description
-git = "https://github.com/rafamadriz/friendly-snippets.git" # git repot with snippets collections
+git = "https://github.com/rafamadriz/friendly-snippets.git" # git repo with snippets collections
 
 [[sources.paths]] # list of paths to load on current source
 scope = ["python"]  # optional scopes for current snippets
-path = "snippets/python/python.json"  # where snippet file located in repo
+path = "snippets/python/python.json"  # where snippet file or dir located in repo
 ```
 
 
