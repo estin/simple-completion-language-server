@@ -70,8 +70,6 @@ pub fn load_snippets_from_file(
     path: &std::path::PathBuf,
     scope: &Option<Vec<String>>,
 ) -> Result<Vec<Snippet>> {
-    let mut snippets = Vec::new();
-
     let scope = if scope.is_none() {
         path.file_stem()
             .and_then(|v| v.to_str())
@@ -102,16 +100,26 @@ pub fn load_snippets_from_file(
         }
     };
 
-    snippets.extend(result?.into_iter().map(|mut s| {
-        // inject scope
-        if s.scope.is_none() {
-            s.scope = scope.to_owned();
-        }
+    let snippets = result?;
 
-        s
-    }));
-
-    Ok(snippets)
+    if let Some(scope) = scope {
+        // add global scope to each snippet
+        Ok(snippets
+            .into_iter()
+            .map(|mut s| {
+                s.scope = Some(if let Some(mut v) = s.scope {
+                    // TODO unique scope items
+                    v.extend(scope.clone());
+                    v
+                } else {
+                    scope.clone()
+                });
+                s
+            })
+            .collect())
+    } else {
+        Ok(snippets)
+    }
 }
 
 pub fn load_snippets_from_path(
