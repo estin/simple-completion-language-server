@@ -10,7 +10,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1.0"
 ropey = "1.6"
-aho-corasick = "1.0"
+aho-corasick = "1.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "io-std", "macros"] }
 tower-lsp = { version = "0.20", features = ["runtime-tokio"] }
 serde = { version = "1", features = ["serde_derive"] }
