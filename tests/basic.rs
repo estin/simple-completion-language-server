@@ -1,4 +1,4 @@
-use simple_completion_language_server::server;
+use simple_completion_language_server::{server, snippets};
 
 use std::pin::Pin;
 use std::str::FromStr;
@@ -70,7 +70,7 @@ struct TestContext {
 }
 
 impl TestContext {
-    pub async fn new() -> anyhow::Result<Self> {
+    pub async fn new(snippets: Vec<snippets::Snippet>) -> anyhow::Result<Self> {
         let (request_tx, rx) = mpsc::unbounded_channel::<String>();
         let (tx, response_rx) = mpsc::unbounded_channel::<String>();
 
@@ -78,7 +78,7 @@ impl TestContext {
         let async_out = AsyncOut(tx);
 
         let server =
-            tokio::spawn(async move { server::start(async_in, async_out, Vec::new()).await });
+            tokio::spawn(async move { server::start(async_in, async_out, snippets).await });
 
         Ok(Self {
             request_tx,
@@ -103,6 +103,7 @@ impl TestContext {
     pub async fn recv<R: std::fmt::Debug + serde::de::DeserializeOwned>(
         &mut self,
     ) -> anyhow::Result<R> {
+        // TODO split response for single messages
         loop {
             let response = self
                 .response_rx
@@ -147,7 +148,7 @@ impl TestContext {
 
 #[test_log::test(tokio::test)]
 async fn initialize() -> anyhow::Result<()> {
-    let mut context = TestContext::new().await?;
+    let mut context = TestContext::new(Vec::new()).await?;
 
     let request = jsonrpc::Request::build("initialize")
         .id(1)
@@ -174,7 +175,7 @@ async fn initialize() -> anyhow::Result<()> {
 
 #[test_log::test(tokio::test)]
 async fn completion() -> anyhow::Result<()> {
-    let mut context = TestContext::new().await?;
+    let mut context = TestContext::new(Vec::new()).await?;
     context.initialize().await?;
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"hello\nhe","uri":"file:///tmp/main.py","version":0}}}"#,
@@ -191,6 +192,47 @@ async fn completion() -> anyhow::Result<()> {
     assert_eq!(
         items.into_iter().map(|i| i.label).collect::<Vec<_>>(),
         vec!["hello"]
+    );
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn snippets() -> anyhow::Result<()> {
+    let mut context = TestContext::new(vec![
+        snippets::Snippet {
+            scope: Some(vec!["python".to_string()]),
+            prefix: "ma".to_string(),
+            body: "def main(): pass".to_string(),
+            description: None,
+        },
+        snippets::Snippet {
+            scope: Some(vec!["c".to_string()]),
+            prefix: "ma".to_string(),
+            body: "malloc".to_string(),
+            description: None,
+        },
+    ])
+    .await?;
+    context.initialize().await?;
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"ma","uri":"file:///tmp/main.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| i.insert_text)
+            .collect::<Vec<_>>(),
+        vec!["def main(): pass"]
     );
 
     Ok(())
