@@ -8,6 +8,7 @@ use std::io::prelude::*;
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::lsp_types::*;
 
+pub mod server;
 pub mod snippets;
 
 use snippets::Snippet;

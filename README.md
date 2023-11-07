@@ -14,7 +14,7 @@ $ cargo install --path .
 
 ### Configure
 
-For Helix on ~/.config/helix/languages.toml
+For Helix on `~/.config/helix/languages.toml`
 
 ```toml
 # introudce new language server
@@ -38,6 +38,8 @@ language-servers = [ "scls", "rust-analyzer" ]
 name = "git-commit"
 language-servers = [ "scls" ]
 
+# etc..
+
 # introduce a new language to enable completion on any doc by forcing language with :set-language stub
 [[language]]
 name = "stub"
@@ -47,8 +49,6 @@ shebangs = []
 roots = []
 auto-format = false
 language-servers = [ "scls" ]
-
-# etc..
 ```
 
 ### Snippets
