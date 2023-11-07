@@ -17,7 +17,7 @@ serde = { version = "1", features = ["serde_derive"] }
 serde_json = { version = "1" }
 
 # snippets
-toml = "0.7"
+toml = "0.8"
 etcetera = "0.8"
 xshell = "0.2"
 
