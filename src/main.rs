@@ -1,8 +1,11 @@
+use std::collections::HashMap;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use xshell::{cmd, Shell};
 
 use simple_completion_language_server::{
-    config_dir, server, snippets::config::load_snippets, snippets::external::ExternalSnippets,
+    config_dir, server,
+    snippets::config::{load_snippets, load_unicode_input_from_path},
+    snippets::external::ExternalSnippets,
     StartOptions,
 };
 
@@ -38,7 +41,13 @@ async fn serve(start_options: &StartOptions) {
         Vec::new()
     });
 
-    server::start(stdin, stdout, snippets).await;
+    let unicode_input = load_unicode_input_from_path(&start_options.unicode_input_path)
+        .unwrap_or_else(|e| {
+            tracing::error!("On read 'unicode input' config: {e}");
+            HashMap::new()
+        });
+
+    server::start(stdin, stdout, snippets, unicode_input).await;
 }
 
 fn help() {
@@ -103,6 +112,12 @@ fn validate_snippets(start_options: &StartOptions) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn validate_unicode_input(start_options: &StartOptions) -> anyhow::Result<()> {
+    let unicode_input = load_unicode_input_from_path(&start_options.unicode_input_path)?;
+    tracing::info!("Successful. Total: {}", unicode_input.len());
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -120,6 +135,13 @@ async fn main() {
             .unwrap_or_else(|_| {
                 let mut filepath = config_dir();
                 filepath.push("external-snippets.toml");
+                filepath
+            }),
+        unicode_input_path: std::env::var("UNICODE_INPUT_PATH")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| {
+                let mut filepath = config_dir();
+                filepath.push("unicode-input");
                 filepath
             }),
     };
@@ -147,6 +169,8 @@ async fn main() {
                 "validate-snippets" => {
                     validate_snippets(&start_options).expect("Failed to validate snippets")
                 }
+                "validate-unicode-input" => validate_unicode_input(&start_options)
+                    .expect("Failed to validate 'unicode input' config"),
                 _ => help(),
             }
         }

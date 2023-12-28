@@ -1,4 +1,5 @@
 use crate::{snippets::Snippet, BackendRequest, BackendResponse, BackendState};
+use std::collections::HashMap;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::jsonrpc::Result;
@@ -95,12 +96,16 @@ impl LanguageServer for Backend {
     }
 }
 
-pub async fn start<I, O>(read: I, write: O, snippets: Vec<Snippet>)
-where
+pub async fn start<I, O>(
+    read: I,
+    write: O,
+    snippets: Vec<Snippet>,
+    unicode_input: HashMap<String, String>,
+) where
     I: AsyncRead + Unpin,
     O: AsyncWrite,
 {
-    let (tx, backend_state) = BackendState::new(snippets).await;
+    let (tx, backend_state) = BackendState::new(snippets, unicode_input).await;
 
     let task = tokio::spawn(backend_state.start());
 

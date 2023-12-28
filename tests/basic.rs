@@ -1,4 +1,5 @@
 use simple_completion_language_server::{server, snippets};
+use std::collections::HashMap;
 
 use std::pin::Pin;
 use std::str::FromStr;
@@ -70,15 +71,19 @@ struct TestContext {
 }
 
 impl TestContext {
-    pub async fn new(snippets: Vec<snippets::Snippet>) -> anyhow::Result<Self> {
+    pub async fn new(
+        snippets: Vec<snippets::Snippet>,
+        unicode_input: HashMap<String, String>,
+    ) -> anyhow::Result<Self> {
         let (request_tx, rx) = mpsc::unbounded_channel::<String>();
         let (tx, response_rx) = mpsc::unbounded_channel::<String>();
 
         let async_in = AsyncIn(rx);
         let async_out = AsyncOut(tx);
 
-        let server =
-            tokio::spawn(async move { server::start(async_in, async_out, snippets).await });
+        let server = tokio::spawn(async move {
+            server::start(async_in, async_out, snippets, unicode_input).await
+        });
 
         Ok(Self {
             request_tx,
@@ -148,7 +153,7 @@ impl TestContext {
 
 #[test_log::test(tokio::test)]
 async fn initialize() -> anyhow::Result<()> {
-    let mut context = TestContext::new(Vec::new()).await?;
+    let mut context = TestContext::new(Vec::new(), HashMap::new()).await?;
 
     let request = jsonrpc::Request::build("initialize")
         .id(1)
@@ -175,7 +180,7 @@ async fn initialize() -> anyhow::Result<()> {
 
 #[test_log::test(tokio::test)]
 async fn completion() -> anyhow::Result<()> {
-    let mut context = TestContext::new(Vec::new()).await?;
+    let mut context = TestContext::new(Vec::new(), HashMap::new()).await?;
     context.initialize().await?;
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"hello\nhe","uri":"file:///tmp/main.py","version":0}}}"#,
@@ -199,20 +204,23 @@ async fn completion() -> anyhow::Result<()> {
 
 #[test_log::test(tokio::test)]
 async fn snippets() -> anyhow::Result<()> {
-    let mut context = TestContext::new(vec![
-        snippets::Snippet {
-            scope: Some(vec!["python".to_string()]),
-            prefix: "ma".to_string(),
-            body: "def main(): pass".to_string(),
-            description: None,
-        },
-        snippets::Snippet {
-            scope: Some(vec!["c".to_string()]),
-            prefix: "ma".to_string(),
-            body: "malloc".to_string(),
-            description: None,
-        },
-    ])
+    let mut context = TestContext::new(
+        vec![
+            snippets::Snippet {
+                scope: Some(vec!["python".to_string()]),
+                prefix: "ma".to_string(),
+                body: "def main(): pass".to_string(),
+                description: None,
+            },
+            snippets::Snippet {
+                scope: Some(vec!["c".to_string()]),
+                prefix: "ma".to_string(),
+                body: "malloc".to_string(),
+                description: None,
+            },
+        ],
+        HashMap::new(),
+    )
     .await?;
     context.initialize().await?;
     context.send_all(&[
@@ -233,6 +241,43 @@ async fn snippets() -> anyhow::Result<()> {
             .filter_map(|i| i.insert_text)
             .collect::<Vec<_>>(),
         vec!["def main(): pass"]
+    );
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn unicode_input() -> anyhow::Result<()> {
+    let mut context = TestContext::new(
+        Vec::new(),
+        HashMap::from_iter([
+            ("alpha".to_string(), "α".to_string()),
+            ("betta".to_string(), "β".to_string()),
+        ]),
+    )
+    .await?;
+    context.initialize().await?;
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"α+bet","uri":"file:///tmp/main.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":5,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    // assert_eq!(items.len(), 1);
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| match i.text_edit {
+                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["β"]
     );
 
     Ok(())

@@ -3,6 +3,7 @@ use crate::snippets::vscode::VSSnippetsConfig;
 use crate::StartOptions;
 use anyhow::Result;
 use serde::Deserialize;
+use std::collections::HashMap;
 
 #[derive(Deserialize)]
 pub struct SnippetsConfig {
@@ -15,6 +16,12 @@ pub struct Snippet {
     pub prefix: String,
     pub body: String,
     pub description: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct UnicodeInputConfig {
+    #[serde(flatten)]
+    pub inner: HashMap<String, String>,
 }
 
 pub fn load_snippets(start_options: &StartOptions) -> Result<Vec<Snippet>> {
@@ -154,4 +161,54 @@ pub fn load_snippets_from_path(
     }
 
     Ok(snippets)
+}
+
+pub fn load_unicode_input_from_file(path: &std::path::PathBuf) -> Result<HashMap<String, String>> {
+    tracing::info!("Try load unicode input from: {path:?}");
+
+    let content = std::fs::read_to_string(path)?;
+
+    let result = match path.extension().and_then(|v| v.to_str()) {
+        Some("toml") => toml::from_str::<UnicodeInputConfig>(&content)
+            .map_err(|e| anyhow::anyhow!(e))
+            .map(|sc| sc.inner),
+        _ => {
+            anyhow::bail!("Unsupported snipptes format: {path:?}")
+        }
+    };
+
+    result
+}
+
+pub fn load_unicode_input_from_path(
+    snippets_path: &std::path::PathBuf,
+) -> Result<HashMap<String, String>> {
+    if snippets_path.is_file() {
+        return load_unicode_input_from_file(snippets_path);
+    }
+
+    let mut result = HashMap::new();
+    match std::fs::read_dir(snippets_path) {
+        Ok(entries) => {
+            for entry in entries {
+                let Ok(entry) = entry else { continue };
+
+                let path = entry.path();
+                if path.is_dir() {
+                    continue;
+                };
+
+                match load_unicode_input_from_file(&path) {
+                    Ok(r) => result.extend(r),
+                    Err(e) => {
+                        tracing::error!("On read unicode input from {path:?}: {e}");
+                        continue;
+                    }
+                }
+            }
+        }
+        Err(e) => tracing::error!("On read dir {snippets_path:?}: {e}"),
+    }
+
+    Ok(result)
 }

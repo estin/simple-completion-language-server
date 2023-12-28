@@ -17,16 +17,21 @@ $ cargo install --path .
 For Helix on `~/.config/helix/languages.toml`
 
 ```toml
-# introudce new language server
-# - set max completion results len to 20
-# - completions will return before snippets by default
+# introduce new language server
 [language-server.scls]
 command = "simple-completion-language-server"
-config = { max_completion_items = 20, snippets_first = false }
+
+[language-server.scls.config]
+max_completion_items = 20     # set max completion results len for each group: words, snippets, unicode-input
+snippets_first = true         # completions will return before snippets by default
+feature_words = true          # enable completion by word
+feature_snippets = true       # enable snippets
+feature_unicode_input = true  # enable "unicode input" (experimental feature)
+
 
 # write logs to /tmp/completion.log
 [language-server.scls.environment]
-RUST_LOG = "debug,simple-completion-langauge-server=debug"
+RUST_LOG = "info,simple-completion-langauge-server=info"
 LOG_FILE = "/tmp/completion.log"
 
 # append langage server to existed languages
@@ -40,7 +45,7 @@ language-servers = [ "scls" ]
 
 # etc..
 
-# introduce a new language to enable completion on any doc by forcing language with :set-language stub
+# introduce a new language to enable completion on any doc by forcing set language with :set-language stub
 [[language]]
 name = "stub"
 scope = "text.stub"
@@ -96,6 +101,28 @@ Validate snippets
 
 ```bash
 $ simple-completion-language-server validate-snippets
+```
+
+### Unicode input
+
+**EXPERIMENTAL FEATURE**
+
+Read unicode input config as each file from dir `~/.config/helix/unicode-input` (or specify path via `UNICODE_INPUT_PATH` env).
+
+Unicode input format (toml key-value)
+
+```toml
+alpha = "α"
+betta = "β"
+gamma = "γ"
+fire = "🔥"
+```
+
+
+Validate unicode input config
+
+```bash
+$ simple-completion-language-server validate-unicode-input
 ```
 
 
