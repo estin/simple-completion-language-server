@@ -164,7 +164,7 @@ pub fn load_snippets_from_path(
 }
 
 pub fn load_unicode_input_from_file(path: &std::path::PathBuf) -> Result<HashMap<String, String>> {
-    tracing::info!("Try load unicode input from: {path:?}");
+    tracing::info!("Try load 'unicode input' config from: {path:?}");
 
     let content = std::fs::read_to_string(path)?;
 
@@ -201,7 +201,7 @@ pub fn load_unicode_input_from_path(
                 match load_unicode_input_from_file(&path) {
                     Ok(r) => result.extend(r),
                     Err(e) => {
-                        tracing::error!("On read unicode input from {path:?}: {e}");
+                        tracing::error!("On read 'unicode input' config from {path:?}: {e}");
                         continue;
                     }
                 }

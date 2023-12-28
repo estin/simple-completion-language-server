@@ -109,7 +109,7 @@ $ simple-completion-language-server validate-snippets
 
 Read unicode input config as each file from dir `~/.config/helix/unicode-input` (or specify path via `UNICODE_INPUT_PATH` env).
 
-Unicode input format (toml key-value)
+Unicode input format (toml key-value), for example `~/.config/helix/unicode-input/base.toml`
 
 ```toml
 alpha = "α"
