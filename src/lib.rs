@@ -369,7 +369,11 @@ impl BackendState {
             .take(self.settings.max_completion_items)
     }
 
-    fn unicode_input(&self, params: &CompletionParams) -> impl Iterator<Item = CompletionItem> {
+    fn unicode_input(
+        &self,
+        word_prefix: &str,
+        params: &CompletionParams,
+    ) -> impl Iterator<Item = CompletionItem> {
         let Ok((chars, _doc)) = self.get_prefix_as_chars(params, self.max_unicude_input_prefix)
         else {
             tracing::error!("Failed to get prefix as sequence of chars");
@@ -417,7 +421,7 @@ impl BackendState {
                     };
                     Some(CompletionItem {
                         label: body.to_string(),
-                        filter_text: Some(prefix.to_string()),
+                        filter_text: Some(format!("{word_prefix}{prefix}")),
                         kind: Some(CompletionItemKind::TEXT),
                         text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
                             replace: range,
@@ -496,7 +500,7 @@ impl BackendState {
                         (true, true, true) => {
                             let words = self.words(prefix, doc);
                             let snippets = self.snippets(prefix, doc);
-                            let unicode_input = self.unicode_input(&params);
+                            let unicode_input = self.unicode_input(prefix, &params);
 
                             if self.settings.snippets_first {
                                 unicode_input.chain(snippets.chain(words)).collect()
@@ -516,7 +520,7 @@ impl BackendState {
                         }
                         (true, false, true) => {
                             let words = self.words(prefix, doc);
-                            let unicode_input = self.unicode_input(&params);
+                            let unicode_input = self.unicode_input(prefix, &params);
 
                             if self.settings.snippets_first {
                                 unicode_input.chain(words).collect()
@@ -526,7 +530,7 @@ impl BackendState {
                         }
                         (false, true, true) => {
                             let snippets = self.snippets(prefix, doc);
-                            let unicode_input = self.unicode_input(&params);
+                            let unicode_input = self.unicode_input(prefix, &params);
 
                             if self.settings.snippets_first {
                                 snippets.chain(unicode_input).collect()
@@ -536,7 +540,7 @@ impl BackendState {
                         }
                         (true, false, false) => self.words(prefix, doc).collect(),
                         (false, true, false) => self.snippets(prefix, doc).collect(),
-                        (false, false, true) => self.unicode_input(&params).collect(),
+                        (false, false, true) => self.unicode_input(prefix, &params).collect(),
                         (false, false, false) => {
                             tracing::error!("All features disabled by settings...");
                             Vec::new()
