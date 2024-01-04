@@ -142,16 +142,23 @@ impl BackendState {
                 let end_idx = doc
                     .text
                     .try_line_to_char(range.end.line as usize)
-                    .map(|idx| idx + range.end.character as usize);
+                    .map(|idx| idx + range.end.character as usize)
+                    .and_then(|c| {
+                        if c > doc.text.len_chars() {
+                            Err(ropey::Error::CharIndexOutOfBounds(c, doc.text.len_chars()))
+                        } else {
+                            Ok(c)
+                        }
+                    });
 
                 match (start_idx, end_idx) {
                     (Ok(start_idx), Err(_)) => {
-                        doc.text.remove(start_idx..);
-                        doc.text.insert(start_idx, &change.text);
+                        doc.text.try_remove(start_idx..)?;
+                        doc.text.try_insert(start_idx, &change.text)?;
                     }
                     (Ok(start_idx), Ok(end_idx)) => {
-                        doc.text.remove(start_idx..end_idx);
-                        doc.text.insert(start_idx, &change.text);
+                        doc.text.try_remove(start_idx..end_idx)?;
+                        doc.text.try_insert(start_idx, &change.text)?;
                     }
                     (Err(_), _) => {
                         *doc = Document {
