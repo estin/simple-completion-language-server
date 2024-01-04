@@ -1,12 +1,13 @@
 <div align="center">
   <p><h1>simple-completion-language-server</h1> </p>
   <p><strong>Allow to use common word completion and snippets for <a href="https://helix-editor.com/">Helix editor</a></strong></p>
-  <p>Based on [comment](https://github.com/helix-editor/helix/pull/3328#issuecomment-1559031060)</p>
+  <p></p>
 </div>
 
 
 https://github.com/estin/simple-completion-language-server/assets/520814/10566ad4-d6d1-475b-8561-2e909be0f875
 
+Based on [comment](https://github.com/helix-editor/helix/pull/3328#issuecomment-1559031060)
 
 ### Install (from source only)
 
