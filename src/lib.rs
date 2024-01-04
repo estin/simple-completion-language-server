@@ -79,6 +79,7 @@ pub enum BackendRequest {
     NewDoc(DidOpenTextDocumentParams),
     ChangeDoc(DidChangeTextDocumentParams),
     ChangeConfiguration(DidChangeConfigurationParams),
+    SaveDoc(DidSaveTextDocumentParams),
     CompletionRequest(
         (
             oneshot::Sender<anyhow::Result<BackendResponse>>,
@@ -129,6 +130,20 @@ impl BackendState {
                 rx: request_rx,
             },
         )
+    }
+
+    fn save_doc(&mut self, params: DidSaveTextDocumentParams) -> Result<()> {
+        let Some(doc) = self.docs.get_mut(&params.text_document.uri) else {
+            anyhow::bail!("Document {} not found", params.text_document.uri)
+        };
+        doc.text = if let Some(text) = &params.text {
+            Rope::from_str(text)
+        } else {
+            // Sync read content from file
+            let file = std::fs::File::open(params.text_document.uri.path())?;
+            Rope::from_reader(file)?
+        };
+        Ok(())
     }
 
     fn change_doc(&mut self, params: DidChangeTextDocumentParams) -> Result<()> {
@@ -464,6 +479,11 @@ impl BackendState {
                             language_id: params.text_document.language_id,
                         },
                     );
+                }
+                BackendRequest::SaveDoc(params) => {
+                    if let Err(e) = self.save_doc(params) {
+                        tracing::error!("Error on save doc: {e}");
+                    }
                 }
                 BackendRequest::ChangeDoc(params) => {
                     if let Err(e) = self.change_doc(params) {

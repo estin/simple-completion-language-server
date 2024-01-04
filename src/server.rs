@@ -60,6 +60,11 @@ impl LanguageServer for Backend {
         let _ = self.send_request(BackendRequest::NewDoc(params)).await;
     }
 
+    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+        tracing::debug!("Did save: {params:?}");
+        let _ = self.send_request(BackendRequest::SaveDoc(params)).await;
+    }
+
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         tracing::debug!("Did change: {params:?}");
         let _ = self.send_request(BackendRequest::ChangeDoc(params)).await;
