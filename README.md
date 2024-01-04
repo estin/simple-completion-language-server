@@ -1,8 +1,12 @@
 <div align="center">
   <p><h1>simple-completion-language-server</h1> </p>
   <p><strong>Allow to use common word completion and snippets for <a href="https://helix-editor.com/">Helix editor</a></strong></p>
-  <p></p>
+  <p>Based on [comment](https://github.com/helix-editor/helix/pull/3328#issuecomment-1559031060)</p>
 </div>
+
+
+https://github.com/estin/simple-completion-language-server/assets/520814/10566ad4-d6d1-475b-8561-2e909be0f875
+
 
 ### Install (from source only)
 
@@ -26,7 +30,7 @@ max_completion_items = 20     # set max completion results len for each group: w
 snippets_first = true         # completions will return before snippets by default
 feature_words = true          # enable completion by word
 feature_snippets = true       # enable snippets
-feature_unicode_input = true  # enable "unicode input" (experimental feature)
+feature_unicode_input = true  # enable "unicode input"
 
 
 # write logs to /tmp/completion.log
@@ -104,8 +108,6 @@ $ simple-completion-language-server validate-snippets
 ```
 
 ### Unicode input
-
-**EXPERIMENTAL FEATURE**
 
 Read unicode input config as each file from dir `~/.config/helix/unicode-input` (or specify path via `UNICODE_INPUT_PATH` env).
 
