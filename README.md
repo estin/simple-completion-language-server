@@ -11,7 +11,15 @@ Based on [comment](https://github.com/helix-editor/helix/pull/3328#issuecomment-
 
 ### Install (from source only)
 
-```bash
+From GitHub:
+
+```console
+$ cargo install --git https://github.com/estin/simple-completion-language-server.git
+```
+
+From local repository:
+
+```console
 $ git clone https://github.com/estin/simple-completion-language-server.git
 $ cd simple-completion-language-server
 $ cargo install --path .
@@ -97,14 +105,14 @@ path = "snippets/python/python.json"  # where snippet file or dir located in rep
 
 Clone or update snippets source repos to `~/.config/helix/external-snippets/<repo path>`
 
-```bash
+```console
 $ simple-completion-language-server fetch-external-snippets
 ```
 
 
 Validate snippets
 
-```bash
+```console
 $ simple-completion-language-server validate-snippets
 ```
 
@@ -124,7 +132,7 @@ fire = "🔥"
 
 Validate unicode input config
 
-```bash
+```console
 $ simple-completion-language-server validate-unicode-input
 ```
 
