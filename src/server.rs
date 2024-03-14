@@ -39,7 +39,10 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
-                completion_provider: Some(CompletionOptions::default()),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![std::path::MAIN_SEPARATOR_STR.to_string()]),
+                    ..CompletionOptions::default()
+                }),
                 ..Default::default()
             },
             ..Default::default()

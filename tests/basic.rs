@@ -166,7 +166,10 @@ async fn initialize() -> anyhow::Result<()> {
 
     assert_eq!(
         response.capabilities.completion_provider,
-        Some(lsp_types::CompletionOptions::default())
+        Some(lsp_types::CompletionOptions {
+            trigger_characters: Some(vec![std::path::MAIN_SEPARATOR_STR.to_string()]),
+            ..lsp_types::CompletionOptions::default()
+        })
     );
     assert_eq!(
         response.capabilities.text_document_sync,
@@ -268,7 +271,6 @@ async fn unicode_input() -> anyhow::Result<()> {
         anyhow::bail!("completion array expected")
     };
 
-    // assert_eq!(items.len(), 1);
     assert_eq!(
         items
             .into_iter()
@@ -278,6 +280,59 @@ async fn unicode_input() -> anyhow::Result<()> {
             })
             .collect::<Vec<_>>(),
         vec!["β"]
+    );
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn paths() -> anyhow::Result<()> {
+    std::fs::create_dir_all("/tmp/scls-test/sub-folder")?;
+
+    let mut context = TestContext::new(Vec::new(), HashMap::new()).await?;
+    context.initialize().await?;
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"/tmp/scls-test/","uri":"file:///tmp/main.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":15,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| match i.text_edit {
+                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["/tmp/scls-test/sub-folder"]
+    );
+
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"/tmp/scls-test/su","uri":"file:///tmp/main2.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":17,"line":0},"textDocument":{"uri":"file:///tmp/main2.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| match i.text_edit {
+                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["/tmp/scls-test/sub-folder"]
     );
 
     Ok(())

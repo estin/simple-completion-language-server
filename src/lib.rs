@@ -29,21 +29,54 @@ pub struct StartOptions {
 #[derive(Deserialize)]
 pub struct BackendSettings {
     pub max_completion_items: usize,
+    pub max_path_chars: usize,
     pub snippets_first: bool,
     // feature flags
     pub feature_words: bool,
     pub feature_snippets: bool,
     pub feature_unicode_input: bool,
+    pub feature_paths: bool,
+}
+
+#[derive(Deserialize)]
+pub struct PartialBackendSettings {
+    pub max_completion_items: Option<usize>,
+    pub max_path_chars: Option<usize>,
+    pub snippets_first: Option<bool>,
+    pub feature_words: Option<bool>,
+    pub feature_snippets: Option<bool>,
+    pub feature_unicode_input: Option<bool>,
+    pub feature_paths: Option<bool>,
 }
 
 impl Default for BackendSettings {
     fn default() -> Self {
         BackendSettings {
             max_completion_items: 20,
+            max_path_chars: 256,
             snippets_first: false,
             feature_words: true,
             feature_snippets: true,
             feature_unicode_input: true,
+            feature_paths: true,
+        }
+    }
+}
+
+impl BackendSettings {
+    pub fn apply_partial_settings(&self, settings: PartialBackendSettings) -> Self {
+        Self {
+            max_completion_items: settings
+                .max_completion_items
+                .unwrap_or(self.max_completion_items),
+            max_path_chars: settings.max_path_chars.unwrap_or(self.max_path_chars),
+            snippets_first: settings.snippets_first.unwrap_or(self.snippets_first),
+            feature_words: settings.feature_words.unwrap_or(self.feature_words),
+            feature_snippets: settings.feature_snippets.unwrap_or(self.feature_snippets),
+            feature_unicode_input: settings
+                .feature_unicode_input
+                .unwrap_or(self.feature_unicode_input),
+            feature_paths: settings.feature_words.unwrap_or(self.feature_paths),
         }
     }
 }
@@ -190,7 +223,9 @@ impl BackendState {
     }
 
     fn change_configuration(&mut self, params: DidChangeConfigurationParams) -> Result<()> {
-        self.settings = serde_json::from_value(params.settings)?;
+        self.settings = self
+            .settings
+            .apply_partial_settings(serde_json::from_value(params.settings)?);
         Ok(())
     }
 
@@ -407,10 +442,9 @@ impl BackendState {
         };
 
         let mut chars_snippets: Vec<CompletionItem> = Vec::new();
-        tracing::debug!("Chars: {chars}");
+
         let l = chars.len();
         for count in 1..l + 1 {
-            tracing::trace!("Chars from {} to {}", l - count, l);
             let Some(start) = chars.char_indices().map(|(i, _)| i).nth(l - count) else {
                 continue;
             };
@@ -419,7 +453,6 @@ impl BackendState {
             if char_prefix.contains('\n') {
                 continue;
             }
-            tracing::trace!("Chars from {} ({start}) to {}: {char_prefix}", l - count, l);
             let items = self
                 .unicode_input
                 .iter()
@@ -461,6 +494,119 @@ impl BackendState {
         }
 
         chars_snippets.into_iter()
+    }
+
+    fn paths(
+        &self,
+        word_prefix: &str,
+        params: &CompletionParams,
+    ) -> impl Iterator<Item = CompletionItem> {
+        let Ok((chars, _)) = self.get_prefix_as_chars(params, self.settings.max_path_chars) else {
+            tracing::error!("Failed to get prefix as sequence of chars");
+            return Vec::new().into_iter();
+        };
+
+        let Some(chars) = chars else {
+            return Vec::new().into_iter();
+        };
+
+        // check is it path
+        if !chars.contains(std::path::MAIN_SEPARATOR) {
+            return Vec::new().into_iter();
+        }
+
+        let Some(first_char) = chars.chars().nth(0) else {
+            return Vec::new().into_iter();
+        };
+        let Some(last_char) = chars.chars().last() else {
+            return Vec::new().into_iter();
+        };
+
+        // sanitize surround chars
+        let chars_prefix = if first_char.is_alphabetic() || first_char == std::path::MAIN_SEPARATOR
+        {
+            chars
+        } else {
+            &chars[1..]
+        };
+
+        // build path
+        let path = std::path::Path::new(chars_prefix);
+
+        // normalize filename
+        let (filename, parent_dir) = if last_char == std::path::MAIN_SEPARATOR {
+            (String::new(), path)
+        } else {
+            let Some(filename) = path.file_name().and_then(|f| f.to_str()) else {
+                return Vec::new().into_iter();
+            };
+            let Some(parent_dir) = path.parent() else {
+                return Vec::new().into_iter();
+            };
+            (filename.to_lowercase(), parent_dir)
+        };
+
+        let items = match parent_dir.read_dir() {
+            Ok(items) => items,
+            Err(e) => {
+                tracing::warn!("On read dir {parent_dir:?}: {e}");
+                return Vec::new().into_iter();
+            }
+        };
+
+        items
+            .into_iter()
+            .filter_map(|item| item.ok())
+            .filter_map(|item| {
+                // convert to regular &str
+                let fname = item.file_name();
+                let Some(item_filename) = fname.to_str() else {
+                    return None;
+                };
+                let item_filename = item_filename.to_lowercase();
+                if !filename.is_empty() && !item_filename.starts_with(&filename) {
+                    return None;
+                }
+
+                // use fullpath
+                let path = item.path();
+                let Some(full_path) = path.to_str() else {
+                    return None;
+                };
+
+                let line = params.text_document_position.position.line;
+                let start =
+                    params.text_document_position.position.character - chars_prefix.len() as u32;
+                let replace_end = params.text_document_position.position.character;
+                let range = Range {
+                    start: Position {
+                        line,
+                        character: start,
+                    },
+                    end: Position {
+                        line,
+                        character: replace_end,
+                    },
+                };
+                Some(CompletionItem {
+                    label: full_path.to_string(),
+                    filter_text: Some(format!("{word_prefix}{full_path}")),
+                    kind: Some(if path.is_dir() {
+                        CompletionItemKind::FOLDER
+                    } else {
+                        CompletionItemKind::FILE
+                    }),
+                    text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
+                        replace: range,
+                        insert: range,
+                        new_text: full_path.to_string(),
+                    })),
+                    ..Default::default()
+                })
+            })
+            .take(self.settings.max_completion_items)
+            .collect::<Vec<_>>()
+            .into_iter()
     }
 
     pub async fn start(mut self) {
@@ -508,71 +654,66 @@ impl BackendState {
                         continue;
                     };
 
-                    let Some(prefix) = prefix else {
-                        tracing::debug!("Empty prefix by completion request");
-                        let response = Ok(BackendResponse::CompletionResponse(
-                            CompletionResponse::Array(Vec::new()),
-                        ));
-                        if tx.send(response).is_err() {
-                            tracing::error!("Error on send completion response");
-                        }
-                        continue;
-                    };
-
-                    let results: Vec<CompletionItem> = match (
-                        self.settings.feature_words,
-                        self.settings.feature_snippets,
-                        self.settings.feature_unicode_input,
-                    ) {
-                        (true, true, true) => {
-                            let words = self.words(prefix, doc);
-                            let snippets = self.snippets(prefix, doc);
-                            let unicode_input = self.unicode_input(prefix, &params);
-
-                            if self.settings.snippets_first {
-                                unicode_input.chain(snippets.chain(words)).collect()
+                    let results: Vec<CompletionItem> = Vec::new()
+                        .into_iter()
+                        .chain(
+                            if let Some(prefix) = &prefix {
+                                if self.settings.feature_snippets & self.settings.snippets_first {
+                                    Some(self.snippets(prefix, doc))
+                                } else {
+                                    None
+                                }
                             } else {
-                                words.chain(unicode_input.chain(snippets)).collect()
+                                None
                             }
-                        }
-                        (true, true, false) => {
-                            let words = self.words(prefix, doc);
-                            let snippets = self.snippets(prefix, doc);
-
-                            if self.settings.snippets_first {
-                                snippets.chain(words).collect()
+                            .into_iter()
+                            .flatten(),
+                        )
+                        .chain(
+                            if let Some(prefix) = &prefix {
+                                if self.settings.feature_words {
+                                    Some(self.words(prefix, doc))
+                                } else {
+                                    None
+                                }
                             } else {
-                                words.chain(snippets).collect()
+                                None
                             }
-                        }
-                        (true, false, true) => {
-                            let words = self.words(prefix, doc);
-                            let unicode_input = self.unicode_input(prefix, &params);
-
-                            if self.settings.snippets_first {
-                                unicode_input.chain(words).collect()
+                            .into_iter()
+                            .flatten(),
+                        )
+                        .chain(
+                            if let Some(prefix) = &prefix {
+                                if self.settings.feature_snippets & !self.settings.snippets_first {
+                                    Some(self.snippets(prefix, doc))
+                                } else {
+                                    None
+                                }
                             } else {
-                                words.chain(unicode_input).collect()
+                                None
                             }
-                        }
-                        (false, true, true) => {
-                            let snippets = self.snippets(prefix, doc);
-                            let unicode_input = self.unicode_input(prefix, &params);
-
-                            if self.settings.snippets_first {
-                                snippets.chain(unicode_input).collect()
+                            .into_iter()
+                            .flatten(),
+                        )
+                        .chain(
+                            if self.settings.feature_unicode_input {
+                                Some(self.unicode_input(prefix.unwrap_or_default(), &params))
                             } else {
-                                unicode_input.chain(snippets).collect()
+                                None
                             }
-                        }
-                        (true, false, false) => self.words(prefix, doc).collect(),
-                        (false, true, false) => self.snippets(prefix, doc).collect(),
-                        (false, false, true) => self.unicode_input(prefix, &params).collect(),
-                        (false, false, false) => {
-                            tracing::error!("All features disabled by settings...");
-                            Vec::new()
-                        }
-                    };
+                            .into_iter()
+                            .flatten(),
+                        )
+                        .chain(
+                            if self.settings.feature_paths {
+                                Some(self.paths(prefix.unwrap_or_default(), &params))
+                            } else {
+                                None
+                            }
+                            .into_iter()
+                            .flatten(),
+                        )
+                        .collect();
 
                     tracing::debug!(
                         "completion request took {:.2}ms with {} result items",

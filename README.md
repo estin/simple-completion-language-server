@@ -40,6 +40,7 @@ snippets_first = true         # completions will return before snippets by defau
 feature_words = true          # enable completion by word
 feature_snippets = true       # enable snippets
 feature_unicode_input = true  # enable "unicode input"
+feature_paths = true          # enable path completion
 
 
 # write logs to /tmp/completion.log
