@@ -109,11 +109,12 @@ pub async fn start<I, O>(
     write: O,
     snippets: Vec<Snippet>,
     unicode_input: HashMap<String, String>,
+    home_dir: String,
 ) where
     I: AsyncRead + Unpin,
     O: AsyncWrite,
 {
-    let (tx, backend_state) = BackendState::new(snippets, unicode_input).await;
+    let (tx, backend_state) = BackendState::new(home_dir, snippets, unicode_input).await;
 
     let task = tokio::spawn(backend_state.start());
 

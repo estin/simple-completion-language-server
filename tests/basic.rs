@@ -74,6 +74,7 @@ impl TestContext {
     pub async fn new(
         snippets: Vec<snippets::Snippet>,
         unicode_input: HashMap<String, String>,
+        home_dir: String,
     ) -> anyhow::Result<Self> {
         let (request_tx, rx) = mpsc::unbounded_channel::<String>();
         let (tx, response_rx) = mpsc::unbounded_channel::<String>();
@@ -82,7 +83,7 @@ impl TestContext {
         let async_out = AsyncOut(tx);
 
         let server = tokio::spawn(async move {
-            server::start(async_in, async_out, snippets, unicode_input).await
+            server::start(async_in, async_out, snippets, unicode_input, home_dir).await
         });
 
         Ok(Self {
@@ -153,7 +154,7 @@ impl TestContext {
 
 #[test_log::test(tokio::test)]
 async fn initialize() -> anyhow::Result<()> {
-    let mut context = TestContext::new(Vec::new(), HashMap::new()).await?;
+    let mut context = TestContext::new(Vec::new(), HashMap::new(), String::new()).await?;
 
     let request = jsonrpc::Request::build("initialize")
         .id(1)
@@ -183,7 +184,7 @@ async fn initialize() -> anyhow::Result<()> {
 
 #[test_log::test(tokio::test)]
 async fn completion() -> anyhow::Result<()> {
-    let mut context = TestContext::new(Vec::new(), HashMap::new()).await?;
+    let mut context = TestContext::new(Vec::new(), HashMap::new(), String::new()).await?;
     context.initialize().await?;
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"hello\nhe","uri":"file:///tmp/main.py","version":0}}}"#,
@@ -223,6 +224,7 @@ async fn snippets() -> anyhow::Result<()> {
             },
         ],
         HashMap::new(),
+        String::new(),
     )
     .await?;
     context.initialize().await?;
@@ -257,6 +259,7 @@ async fn unicode_input() -> anyhow::Result<()> {
             ("alpha".to_string(), "α".to_string()),
             ("betta".to_string(), "β".to_string()),
         ]),
+        String::new(),
     )
     .await?;
     context.initialize().await?;
@@ -289,7 +292,7 @@ async fn unicode_input() -> anyhow::Result<()> {
 async fn paths() -> anyhow::Result<()> {
     std::fs::create_dir_all("/tmp/scls-test/sub-folder")?;
 
-    let mut context = TestContext::new(Vec::new(), HashMap::new()).await?;
+    let mut context = TestContext::new(Vec::new(), HashMap::new(), "/tmp".to_string()).await?;
     context.initialize().await?;
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"/tmp/scls-test/","uri":"file:///tmp/main.py","version":0}}}"#,
@@ -333,6 +336,28 @@ async fn paths() -> anyhow::Result<()> {
             })
             .collect::<Vec<_>>(),
         vec!["/tmp/scls-test/sub-folder"]
+    );
+
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"~/scls-test/su","uri":"file:///tmp/main3.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":14,"line":0},"textDocument":{"uri":"file:///tmp/main3.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| match i.text_edit {
+                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["~/scls-test/sub-folder"]
     );
 
     Ok(())

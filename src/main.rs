@@ -1,9 +1,10 @@
+use etcetera::base_strategy::{choose_base_strategy, BaseStrategy};
 use std::collections::HashMap;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use xshell::{cmd, Shell};
 
 use simple_completion_language_server::{
-    config_dir, server,
+    server,
     snippets::config::{load_snippets, load_unicode_input_from_path},
     snippets::external::ExternalSnippets,
     StartOptions,
@@ -47,7 +48,14 @@ async fn serve(start_options: &StartOptions) {
             HashMap::new()
         });
 
-    server::start(stdin, stdout, snippets, unicode_input).await;
+    server::start(
+        stdin,
+        stdout,
+        snippets,
+        unicode_input,
+        start_options.home_dir.clone(),
+    )
+    .await;
 }
 
 fn help() {
@@ -122,25 +130,34 @@ fn validate_unicode_input(start_options: &StartOptions) -> anyhow::Result<()> {
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
 
+    let strategy = choose_base_strategy().expect("Unable to find the config directory!");
+    let mut config_dir = strategy.config_dir();
+    config_dir.push("helix");
+
     let start_options = StartOptions {
+        home_dir: etcetera::home_dir()
+            .expect("Unable to get home dir!")
+            .to_str()
+            .expect("Unable to get home dir as string!")
+            .to_string(),
         snippets_path: std::env::var("SNIPPETS_PATH")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| {
-                let mut filepath = config_dir();
+                let mut filepath = config_dir.clone();
                 filepath.push("snippets");
                 filepath
             }),
         external_snippets_config_path: std::env::var("EXTERNAL_SNIPPETS_CONFIG")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| {
-                let mut filepath = config_dir();
+                let mut filepath = config_dir.clone();
                 filepath.push("external-snippets.toml");
                 filepath
             }),
         unicode_input_path: std::env::var("UNICODE_INPUT_PATH")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| {
-                let mut filepath = config_dir();
+                let mut filepath = config_dir.clone();
                 filepath.push("unicode-input");
                 filepath
             }),

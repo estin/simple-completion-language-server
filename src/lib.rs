@@ -1,8 +1,8 @@
 use aho_corasick::AhoCorasick;
 use anyhow::Result;
-use etcetera::base_strategy::{choose_base_strategy, BaseStrategy};
 use ropey::Rope;
 use serde::Deserialize;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::io::prelude::*;
 use tokio::sync::{mpsc, oneshot};
@@ -13,14 +13,8 @@ pub mod snippets;
 
 use snippets::Snippet;
 
-pub fn config_dir() -> std::path::PathBuf {
-    let strategy = choose_base_strategy().expect("Unable to find the config directory!");
-    let mut path = strategy.config_dir();
-    path.push("helix");
-    path
-}
-
 pub struct StartOptions {
+    pub home_dir: String,
     pub external_snippets_config_path: std::path::PathBuf,
     pub snippets_path: std::path::PathBuf,
     pub unicode_input_path: std::path::PathBuf,
@@ -133,6 +127,7 @@ pub struct Document {
 }
 
 pub struct BackendState {
+    home_dir: String,
     settings: BackendSettings,
     docs: HashMap<Url, Document>,
     snippets: Vec<Snippet>,
@@ -143,6 +138,7 @@ pub struct BackendState {
 
 impl BackendState {
     pub async fn new(
+        home_dir: String,
         snippets: Vec<Snippet>,
         unicode_input: HashMap<String, String>,
     ) -> (mpsc::UnboundedSender<BackendRequest>, Self) {
@@ -151,6 +147,7 @@ impl BackendState {
         (
             request_tx,
             BackendState {
+                home_dir,
                 settings: BackendSettings::default(),
                 docs: HashMap::new(),
                 snippets,
@@ -523,15 +520,29 @@ impl BackendState {
         };
 
         // sanitize surround chars
-        let chars_prefix = if first_char.is_alphabetic() || first_char == std::path::MAIN_SEPARATOR
+        let chars_prefix = if first_char.is_alphabetic()
+            || first_char == std::path::MAIN_SEPARATOR
+            || first_char == '~'
         {
             chars
         } else {
             &chars[1..]
         };
 
+        let chars_prefix_len = chars_prefix.len() as u32;
+
+        // expand tilde to home dir
+        let (is_tilde_exapnded, chars_prefix) = if chars_prefix.starts_with("~/") {
+            (
+                true,
+                Cow::Owned(chars_prefix.replacen('~', &self.home_dir, 1)),
+            )
+        } else {
+            (false, Cow::Borrowed(chars_prefix))
+        };
+
         // build path
-        let path = std::path::Path::new(chars_prefix);
+        let path = std::path::Path::new(chars_prefix.as_ref());
 
         // normalize filename
         let (filename, parent_dir) = if last_char == std::path::MAIN_SEPARATOR {
@@ -574,9 +585,15 @@ impl BackendState {
                     return None;
                 };
 
+                // fold back to tilde
+                let full_path = if is_tilde_exapnded {
+                    Cow::Owned(full_path.replacen(&self.home_dir, "~", 1))
+                } else {
+                    Cow::Borrowed(full_path)
+                };
+
                 let line = params.text_document_position.position.line;
-                let start =
-                    params.text_document_position.position.character - chars_prefix.len() as u32;
+                let start = params.text_document_position.position.character - chars_prefix_len;
                 let replace_end = params.text_document_position.position.character;
                 let range = Range {
                     start: Position {
