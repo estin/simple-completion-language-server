@@ -40,6 +40,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
                 completion_provider: Some(CompletionOptions {
+                    resolve_provider: Some(false),
                     trigger_characters: Some(vec![std::path::MAIN_SEPARATOR_STR.to_string()]),
                     ..CompletionOptions::default()
                 }),
@@ -101,6 +102,11 @@ impl LanguageServer for Backend {
                 return Err(tower_lsp::jsonrpc::Error::internal_error());
             }
         }
+    }
+
+    // mock completionItem/resolve
+    async fn completion_resolve(&self, params: CompletionItem) -> Result<CompletionItem> {
+        Ok(params)
     }
 }
 

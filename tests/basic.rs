@@ -168,6 +168,7 @@ async fn initialize() -> anyhow::Result<()> {
     assert_eq!(
         response.capabilities.completion_provider,
         Some(lsp_types::CompletionOptions {
+            resolve_provider: Some(false),
             trigger_characters: Some(vec![std::path::MAIN_SEPARATOR_STR.to_string()]),
             ..lsp_types::CompletionOptions::default()
         })
