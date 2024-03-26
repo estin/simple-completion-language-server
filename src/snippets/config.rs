@@ -97,7 +97,13 @@ pub fn load_snippets_from_file(
         Some("json") => serde_json::from_str::<VSSnippetsConfig>(&content)
             .map(|s| {
                 s.snippets
-                    .into_values()
+                    .into_iter()
+                    .map(|(prefix, snippet)| {
+                        if snippet.prefix.is_some() {
+                            return snippet;
+                        }
+                        snippet.prefix(prefix)
+                    })
                     .flat_map(Into::<Vec<Snippet>>::into)
                     .collect()
             })
