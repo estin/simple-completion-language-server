@@ -80,6 +80,15 @@ pub fn char_is_word(ch: char) -> bool {
     ch.is_alphanumeric() || ch == '_'
 }
 
+#[inline]
+pub fn starts_with(source: &str, s: &str) -> bool {
+    if s.len() > source.len() {
+        return false;
+    }
+    let part = &source[..s.len()];
+    caseless::default_caseless_match_str(part, s)
+}
+
 pub struct RopeReader<'a> {
     chunks: ropey::iter::Chunks<'a>,
 }
@@ -322,8 +331,22 @@ impl BackendState {
 
         for mat in searcher.take(to_take) {
             let mat = mat?;
-            let mat_end = doc.text.byte_to_char(mat.end());
 
+            // calc word start
+            let mut iter = doc
+                .text
+                .get_chars_at(mat.start())
+                .ok_or_else(|| anyhow::anyhow!("bounds error"))?;
+            iter.reverse();
+            let offset = iter.take_while(|ch| char_is_word(*ch)).count();
+            let word_start = mat.start().saturating_sub(offset);
+
+            if word_start + prefix.len() >= len_bytes {
+                continue;
+            }
+
+            // calc word end
+            let mat_end = doc.text.byte_to_char(mat.end());
             let word_end = doc
                 .text
                 .chars()
@@ -337,11 +360,14 @@ impl BackendState {
                 continue;
             }
 
-            let item = doc.text.byte_slice(mat.start()..word_end);
-            if item != prefix {
-                result.insert(item.to_string());
-                if result.len() >= self.settings.max_completion_items {
-                    return Ok(result);
+            // let item = doc.text.byte_slice(mat.start()..word_end);
+            let item = doc.text.byte_slice(word_start..word_end);
+            if let Some(item) = item.as_str() {
+                if item != prefix && starts_with(item, prefix) {
+                    result.insert(item.to_string());
+                    if result.len() >= self.settings.max_completion_items {
+                        return Ok(result);
+                    }
                 }
             }
         }
@@ -571,9 +597,7 @@ impl BackendState {
             .filter_map(|item| {
                 // convert to regular &str
                 let fname = item.file_name();
-                let Some(item_filename) = fname.to_str() else {
-                    return None;
-                };
+                let item_filename = fname.to_str()?;
                 let item_filename = item_filename.to_lowercase();
                 if !filename.is_empty() && !item_filename.starts_with(&filename) {
                     return None;
@@ -581,10 +605,7 @@ impl BackendState {
 
                 // use fullpath
                 let path = item.path();
-                let Some(full_path) = path.to_str() else {
-                    return None;
-                };
-
+                let full_path = path.to_str()?;
                 // fold back to tilde
                 let full_path = if is_tilde_exapnded {
                     Cow::Owned(full_path.replacen(&self.home_dir, "~", 1))

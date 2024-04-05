@@ -204,6 +204,19 @@ async fn completion() -> anyhow::Result<()> {
         vec!["hello"]
     );
 
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"hello\nel","uri":"file:///tmp/main2.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":1},"textDocument":{"uri":"file:///tmp/main2.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(items.len(), 0);
+
     Ok(())
 }
 
