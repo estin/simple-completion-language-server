@@ -23,7 +23,7 @@ pub struct StartOptions {
 #[derive(Deserialize)]
 pub struct BackendSettings {
     pub max_completion_items: usize,
-    pub max_path_chars: usize,
+    pub max_chars_prefix_len: usize,
     pub snippets_first: bool,
     // feature flags
     pub feature_words: bool,
@@ -47,7 +47,7 @@ impl Default for BackendSettings {
     fn default() -> Self {
         BackendSettings {
             max_completion_items: 20,
-            max_path_chars: 256,
+            max_chars_prefix_len: 64,
             snippets_first: false,
             feature_words: true,
             feature_snippets: true,
@@ -63,7 +63,7 @@ impl BackendSettings {
             max_completion_items: settings
                 .max_completion_items
                 .unwrap_or(self.max_completion_items),
-            max_path_chars: settings.max_path_chars.unwrap_or(self.max_path_chars),
+            max_chars_prefix_len: settings.max_path_chars.unwrap_or(self.max_chars_prefix_len),
             snippets_first: settings.snippets_first.unwrap_or(self.snippets_first),
             feature_words: settings.feature_words.unwrap_or(self.feature_words),
             feature_snippets: settings.feature_snippets.unwrap_or(self.feature_snippets),
@@ -141,7 +141,7 @@ pub struct BackendState {
     docs: HashMap<Url, Document>,
     snippets: Vec<Snippet>,
     unicode_input: HashMap<String, String>,
-    max_unicude_input_prefix: usize,
+    max_unicude_input_prefix_len: usize,
     rx: mpsc::UnboundedReceiver<BackendRequest>,
 }
 
@@ -160,7 +160,7 @@ impl BackendState {
                 settings: BackendSettings::default(),
                 docs: HashMap::new(),
                 snippets,
-                max_unicude_input_prefix: unicode_input
+                max_unicude_input_prefix_len: unicode_input
                     .keys()
                     .map(|s| s.len())
                     .max()
@@ -235,7 +235,11 @@ impl BackendState {
         Ok(())
     }
 
-    fn get_prefix(&self, params: &CompletionParams) -> Result<(Option<&str>, &Document)> {
+    fn get_prefix(
+        &self,
+        max_chars: usize,
+        params: &CompletionParams,
+    ) -> Result<(Option<&str>, Option<&str>, &Document)> {
         let Some(doc) = self
             .docs
             .get(&params.text_document_position.text_document.uri)
@@ -257,41 +261,14 @@ impl BackendState {
             .ok_or_else(|| anyhow::anyhow!("bounds error"))?;
         iter.reverse();
         let offset = iter.take_while(|ch| char_is_word(*ch)).count();
-        let start_offset = cursor.saturating_sub(offset);
-
-        if cursor == start_offset {
-            return Ok((None, doc));
-        }
+        let start_offset_word = cursor.saturating_sub(offset);
 
         let len_chars = doc.text.len_chars();
-        if start_offset > len_chars || cursor > len_chars {
+
+        if start_offset_word > len_chars || cursor > len_chars {
             anyhow::bail!("bounds error")
         }
 
-        let prefix = doc.text.slice(start_offset..cursor).as_str();
-        Ok((prefix, doc))
-    }
-
-    fn get_prefix_as_chars(
-        &self,
-        params: &CompletionParams,
-        max_chars: usize,
-    ) -> Result<(Option<&str>, &Document)> {
-        let Some(doc) = self
-            .docs
-            .get(&params.text_document_position.text_document.uri)
-        else {
-            anyhow::bail!(
-                "Document {} not found",
-                params.text_document_position.text_document.uri
-            )
-        };
-
-        // word prefix
-        let cursor = doc
-            .text
-            .try_line_to_char(params.text_document_position.position.line as usize)?
-            + params.text_document_position.position.character as usize;
         let mut iter = doc
             .text
             .get_chars_at(cursor)
@@ -301,20 +278,15 @@ impl BackendState {
             .enumerate()
             .take_while(|(i, ch)| *i < max_chars && *ch != ' ' && *ch != '\n')
             .count();
-        let start_offset = cursor.saturating_sub(offset);
-        tracing::debug!("Cursor: {cursor} offset: {offset} start_offset: {start_offset}",);
+        let start_offset_chars = cursor.saturating_sub(offset);
 
-        if cursor == start_offset {
-            return Ok((None, doc));
+        if start_offset_chars > len_chars || cursor > len_chars {
+            anyhow::bail!("bounds error")
         }
 
-        let len_chars = doc.text.len_chars();
-        if start_offset > len_chars || cursor > len_chars {
-            return Ok((None, doc));
-        }
-
-        let prefix = doc.text.slice(start_offset..cursor).as_str();
-        Ok((prefix, doc))
+        let prefix = doc.text.slice(start_offset_word..cursor).as_str();
+        let chars_prefix = doc.text.slice(start_offset_chars..cursor).as_str();
+        Ok((prefix, chars_prefix, doc))
     }
 
     fn search(
@@ -423,28 +395,49 @@ impl BackendState {
         &'a self,
         prefix: &'a str,
         doc: &'a Document,
+        params: &'a CompletionParams,
     ) -> impl Iterator<Item = CompletionItem> + 'a {
         self.snippets
             .iter()
             .filter(move |s| {
-                s.prefix.starts_with(prefix)
-                    && if let Some(scope) = &s.scope {
-                        scope.is_empty() | scope.contains(&doc.language_id)
-                    } else {
-                        true
-                    }
-            })
-            .map(move |s| CompletionItem {
-                label: s.prefix.to_owned(),
-                kind: Some(CompletionItemKind::SNIPPET),
-                detail: Some(if let Some(description) = &s.description {
-                    format!("{description}\n{}", s.body)
+                let filter_by_scope = if let Some(scope) = &s.scope {
+                    scope.is_empty() | scope.contains(&doc.language_id)
                 } else {
-                    s.body.to_string()
-                }),
-                insert_text: Some(s.body.to_string()),
-                insert_text_format: Some(InsertTextFormat::SNIPPET),
-                ..Default::default()
+                    true
+                };
+                filter_by_scope && starts_with(s.prefix.as_str(), prefix)
+            })
+            .map(move |s| {
+                let line = params.text_document_position.position.line;
+                let start = params.text_document_position.position.character - prefix.len() as u32;
+                let replace_end = params.text_document_position.position.character;
+                let range = Range {
+                    start: Position {
+                        line,
+                        character: start,
+                    },
+                    end: Position {
+                        line,
+                        character: replace_end,
+                    },
+                };
+                CompletionItem {
+                    label: s.prefix.to_owned(),
+                    filter_text: Some(format!("{prefix}{}", s.prefix)),
+                    kind: Some(CompletionItemKind::SNIPPET),
+                    detail: Some(if let Some(description) = &s.description {
+                        format!("{description}\n{}", s.body)
+                    } else {
+                        s.body.to_string()
+                    }),
+                    text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
+                        replace: range,
+                        insert: range,
+                        new_text: s.body.to_string(),
+                    })),
+                    insert_text_format: Some(InsertTextFormat::SNIPPET),
+                    ..Default::default()
+                }
             })
             .take(self.settings.max_completion_items)
     }
@@ -452,35 +445,29 @@ impl BackendState {
     fn unicode_input(
         &self,
         word_prefix: &str,
+        chars_prefix: &str,
         params: &CompletionParams,
     ) -> impl Iterator<Item = CompletionItem> {
-        let Ok((chars, _doc)) = self.get_prefix_as_chars(params, self.max_unicude_input_prefix)
-        else {
-            tracing::error!("Failed to get prefix as sequence of chars");
-            return Vec::new().into_iter();
-        };
-
-        let Some(chars) = chars else {
-            return Vec::new().into_iter();
-        };
-
         let mut chars_snippets: Vec<CompletionItem> = Vec::new();
 
+        let chars = chars_prefix;
+        let start = if chars_prefix.len() > self.max_unicude_input_prefix_len {
+            chars_prefix.len() - self.max_unicude_input_prefix_len + 1
+        } else {
+            1
+        };
+
         let l = chars.len();
-        for count in 1..l + 1 {
+        for count in start..l + 1 {
             let Some(start) = chars.char_indices().map(|(i, _)| i).nth(l - count) else {
                 continue;
             };
             let char_prefix = &chars[start..];
-
-            if char_prefix.contains('\n') {
-                continue;
-            }
             let items = self
                 .unicode_input
                 .iter()
                 .filter_map(|(prefix, body)| {
-                    if !prefix.starts_with(char_prefix) {
+                    if !starts_with(prefix, char_prefix) {
                         return None;
                     }
                     let line = params.text_document_position.position.line;
@@ -522,26 +509,18 @@ impl BackendState {
     fn paths(
         &self,
         word_prefix: &str,
+        chars_prefix: &str,
         params: &CompletionParams,
     ) -> impl Iterator<Item = CompletionItem> {
-        let Ok((chars, _)) = self.get_prefix_as_chars(params, self.settings.max_path_chars) else {
-            tracing::error!("Failed to get prefix as sequence of chars");
-            return Vec::new().into_iter();
-        };
-
-        let Some(chars) = chars else {
-            return Vec::new().into_iter();
-        };
-
         // check is it path
-        if !chars.contains(std::path::MAIN_SEPARATOR) {
+        if !chars_prefix.contains(std::path::MAIN_SEPARATOR) {
             return Vec::new().into_iter();
         }
 
-        let Some(first_char) = chars.chars().nth(0) else {
+        let Some(first_char) = chars_prefix.chars().nth(0) else {
             return Vec::new().into_iter();
         };
-        let Some(last_char) = chars.chars().last() else {
+        let Some(last_char) = chars_prefix.chars().last() else {
             return Vec::new().into_iter();
         };
 
@@ -550,9 +529,9 @@ impl BackendState {
             || first_char == std::path::MAIN_SEPARATOR
             || first_char == '~'
         {
-            chars
+            chars_prefix
         } else {
-            &chars[1..]
+            &chars_prefix[1..]
         };
 
         let chars_prefix_len = chars_prefix.len() as u32;
@@ -682,7 +661,9 @@ impl BackendState {
                 BackendRequest::CompletionRequest((tx, params)) => {
                     let now = std::time::Instant::now();
 
-                    let Ok((prefix, doc)) = self.get_prefix(&params) else {
+                    let Ok((prefix, chars_prefix, doc)) =
+                        self.get_prefix(self.settings.max_chars_prefix_len, &params)
+                    else {
                         if tx
                             .send(Err(anyhow::anyhow!("Failed to get prefix")))
                             .is_err()
@@ -695,9 +676,9 @@ impl BackendState {
                     let results: Vec<CompletionItem> = Vec::new()
                         .into_iter()
                         .chain(
-                            if let Some(prefix) = &prefix {
+                            if let Some(chars_prefix) = chars_prefix {
                                 if self.settings.feature_snippets & self.settings.snippets_first {
-                                    Some(self.snippets(prefix, doc))
+                                    Some(self.snippets(chars_prefix, doc, &params))
                                 } else {
                                     None
                                 }
@@ -708,7 +689,7 @@ impl BackendState {
                             .flatten(),
                         )
                         .chain(
-                            if let Some(prefix) = &prefix {
+                            if let Some(prefix) = prefix {
                                 if self.settings.feature_words {
                                     Some(self.words(prefix, doc))
                                 } else {
@@ -721,9 +702,9 @@ impl BackendState {
                             .flatten(),
                         )
                         .chain(
-                            if let Some(prefix) = &prefix {
+                            if let Some(chars_prefix) = chars_prefix {
                                 if self.settings.feature_snippets & !self.settings.snippets_first {
-                                    Some(self.snippets(prefix, doc))
+                                    Some(self.snippets(chars_prefix, doc, &params))
                                 } else {
                                     None
                                 }
@@ -734,8 +715,16 @@ impl BackendState {
                             .flatten(),
                         )
                         .chain(
-                            if self.settings.feature_unicode_input {
-                                Some(self.unicode_input(prefix.unwrap_or_default(), &params))
+                            if let Some(chars_prefix) = chars_prefix {
+                                if self.settings.feature_unicode_input {
+                                    Some(self.unicode_input(
+                                        prefix.unwrap_or_default(),
+                                        chars_prefix,
+                                        &params,
+                                    ))
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             }
@@ -743,8 +732,16 @@ impl BackendState {
                             .flatten(),
                         )
                         .chain(
-                            if self.settings.feature_paths {
-                                Some(self.paths(prefix.unwrap_or_default(), &params))
+                            if let Some(chars_prefix) = chars_prefix {
+                                if self.settings.feature_paths {
+                                    Some(self.paths(
+                                        prefix.unwrap_or_default(),
+                                        chars_prefix,
+                                        &params,
+                                    ))
+                                } else {
+                                    None
+                                }
                             } else {
                                 None
                             }

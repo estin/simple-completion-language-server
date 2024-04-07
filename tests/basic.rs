@@ -257,7 +257,10 @@ async fn snippets() -> anyhow::Result<()> {
     assert_eq!(
         items
             .into_iter()
-            .filter_map(|i| i.insert_text)
+            .filter_map(|i| i.text_edit.and_then(|l| match l {
+                lsp_types::CompletionTextEdit::InsertAndReplace(t) => Some(t.new_text),
+                _ => None,
+            }))
             .collect::<Vec<_>>(),
         vec!["def main(): pass"]
     );
