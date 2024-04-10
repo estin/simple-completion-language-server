@@ -179,7 +179,7 @@ pub fn load_unicode_input_from_file(path: &std::path::PathBuf) -> Result<HashMap
             .map_err(|e| anyhow::anyhow!(e))
             .map(|sc| sc.inner),
         _ => {
-            anyhow::bail!("Unsupported snipptes format: {path:?}")
+            anyhow::bail!("Unsupported unicode format: {path:?}")
         }
     };
 

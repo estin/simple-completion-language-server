@@ -85,7 +85,9 @@ pub fn starts_with(source: &str, s: &str) -> bool {
     if s.len() > source.len() {
         return false;
     }
-    let part = &source[..s.len()];
+    let Some(part) = source.get(..s.len()) else {
+        return false;
+    };
     caseless::default_caseless_match_str(part, s)
 }
 
@@ -186,45 +188,46 @@ impl BackendState {
     }
 
     fn change_doc(&mut self, params: DidChangeTextDocumentParams) -> Result<()> {
-        if let Some(doc) = self.docs.get_mut(&params.text_document.uri) {
-            for change in params.content_changes {
-                let Some(range) = change.range else { continue };
-                let start_idx = doc
-                    .text
-                    .try_line_to_char(range.start.line as usize)
-                    .map(|idx| idx + range.start.character as usize);
-                let end_idx = doc
-                    .text
-                    .try_line_to_char(range.end.line as usize)
-                    .map(|idx| idx + range.end.character as usize)
-                    .and_then(|c| {
-                        if c > doc.text.len_chars() {
-                            Err(ropey::Error::CharIndexOutOfBounds(c, doc.text.len_chars()))
-                        } else {
-                            Ok(c)
-                        }
-                    });
+        let Some(doc) = self.docs.get_mut(&params.text_document.uri) else {
+            tracing::error!("Doc {} not found", params.text_document.uri);
+            return Ok(());
+        };
+        for change in params.clone().content_changes {
+            let Some(range) = change.range else { continue };
+            let start_idx = doc
+                .text
+                .try_line_to_char(range.start.line as usize)
+                .map(|idx| idx + range.start.character as usize);
+            let end_idx = doc
+                .text
+                .try_line_to_char(range.end.line as usize)
+                .map(|idx| idx + range.end.character as usize)
+                .and_then(|c| {
+                    if c > doc.text.len_chars() {
+                        Err(ropey::Error::CharIndexOutOfBounds(c, doc.text.len_chars()))
+                    } else {
+                        Ok(c)
+                    }
+                });
 
-                match (start_idx, end_idx) {
-                    (Ok(start_idx), Err(_)) => {
-                        doc.text.try_remove(start_idx..)?;
-                        doc.text.try_insert(start_idx, &change.text)?;
-                    }
-                    (Ok(start_idx), Ok(end_idx)) => {
-                        doc.text.try_remove(start_idx..end_idx)?;
-                        doc.text.try_insert(start_idx, &change.text)?;
-                    }
-                    (Err(_), _) => {
-                        *doc = Document {
-                            uri: doc.uri.clone(),
-                            text: Rope::from(change.text),
-                            language_id: doc.language_id.clone(),
-                        }
+            match (start_idx, end_idx) {
+                (Ok(start_idx), Err(_)) => {
+                    doc.text.try_remove(start_idx..)?;
+                    doc.text.try_insert(start_idx, &change.text)?;
+                }
+                (Ok(start_idx), Ok(end_idx)) => {
+                    doc.text.try_remove(start_idx..end_idx)?;
+                    doc.text.try_insert(start_idx, &change.text)?;
+                }
+                (Err(_), _) => {
+                    *doc = Document {
+                        uri: doc.uri.clone(),
+                        text: Rope::from(change.text),
+                        language_id: doc.language_id.clone(),
                     }
                 }
             }
         }
-
         Ok(())
     }
 
@@ -305,10 +308,9 @@ impl BackendState {
             let mat = mat?;
 
             // calc word start
-            let mut iter = doc
-                .text
-                .get_chars_at(mat.start())
-                .ok_or_else(|| anyhow::anyhow!("bounds error"))?;
+            let Some(mut iter) = doc.text.get_chars_at(mat.start()) else {
+                continue;
+            };
             iter.reverse();
             let offset = iter.take_while(|ch| char_is_word(*ch)).count();
             let word_start = mat.start().saturating_sub(offset);
@@ -331,9 +333,13 @@ impl BackendState {
             if word_end > len_bytes {
                 continue;
             }
-
-            // let item = doc.text.byte_slice(mat.start()..word_end);
-            let item = doc.text.byte_slice(word_start..word_end);
+            let Ok(start_char_idx) = doc.text.try_byte_to_char(word_start) else {
+                continue;
+            };
+            let Ok(end_char_idx) = doc.text.try_byte_to_char(word_end) else {
+                continue;
+            };
+            let item = doc.text.slice(start_char_idx..end_char_idx);
             if let Some(item) = item.as_str() {
                 if item != prefix && starts_with(item, prefix) {
                     result.insert(item.to_string());
