@@ -81,6 +81,11 @@ pub fn char_is_word(ch: char) -> bool {
 }
 
 #[inline]
+pub fn char_is_char_prefix(ch: char) -> bool {
+    ch != ' ' && ch != '\n' && ch != '\t'
+}
+
+#[inline]
 pub fn starts_with(source: &str, s: &str) -> bool {
     if s.len() > source.len() {
         return false;
@@ -279,7 +284,7 @@ impl BackendState {
         iter.reverse();
         let offset = iter
             .enumerate()
-            .take_while(|(i, ch)| *i < max_chars && *ch != ' ' && *ch != '\n')
+            .take_while(|(i, ch)| *i < max_chars && char_is_char_prefix(*ch))
             .count();
         let start_offset_chars = cursor.saturating_sub(offset);
 
