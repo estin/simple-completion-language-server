@@ -70,7 +70,7 @@ impl BackendSettings {
             feature_unicode_input: settings
                 .feature_unicode_input
                 .unwrap_or(self.feature_unicode_input),
-            feature_paths: settings.feature_words.unwrap_or(self.feature_paths),
+            feature_paths: settings.feature_paths.unwrap_or(self.feature_paths),
         }
     }
 }
