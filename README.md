@@ -45,10 +45,10 @@ feature_paths = true          # enable path completion
 
 # write logs to /tmp/completion.log
 [language-server.scls.environment]
-RUST_LOG = "info,simple-completion-langauge-server=info"
+RUST_LOG = "info,simple-completion-language-server=info"
 LOG_FILE = "/tmp/completion.log"
 
-# append langage server to existed languages
+# append language server to existed languages
 [[language]]
 name = "rust"
 language-servers = [ "scls", "rust-analyzer" ]
