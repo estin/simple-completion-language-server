@@ -436,10 +436,17 @@ impl BackendState {
                     label: s.prefix.to_owned(),
                     filter_text: Some(format!("{prefix}{}", s.prefix)),
                     kind: Some(CompletionItemKind::SNIPPET),
-                    detail: Some(if let Some(description) = &s.description {
-                        format!("{description}\n{}", s.body)
+                    detail: Some(s.body.to_string()),
+                    documentation: Some(if let Some(description) = &s.description {
+                        Documentation::MarkupContent(MarkupContent {
+                            kind: MarkupKind::Markdown,
+                            value: format!(
+                                "{description}\n```{}\n{}\n```",
+                                doc.language_id, s.body
+                            ),
+                        })
                     } else {
-                        s.body.to_string()
+                        Documentation::String(s.body.to_string())
                     }),
                     text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
                         replace: range,
