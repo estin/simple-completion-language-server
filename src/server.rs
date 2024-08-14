@@ -60,8 +60,6 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.log_info(&format!("Did open: {}", params.text_document.uri.as_str()))
-            .await;
         let _ = self.send_request(BackendRequest::NewDoc(params)).await;
     }
 

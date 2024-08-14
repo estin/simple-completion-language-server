@@ -68,6 +68,7 @@ struct TestContext {
     pub request_tx: UnboundedSender<String>,
     pub response_rx: UnboundedReceiver<String>,
     pub _server: tokio::task::JoinHandle<()>,
+    pub _client: tokio::task::JoinHandle<()>,
 }
 
 impl TestContext {
@@ -77,7 +78,8 @@ impl TestContext {
         home_dir: String,
     ) -> anyhow::Result<Self> {
         let (request_tx, rx) = mpsc::unbounded_channel::<String>();
-        let (tx, response_rx) = mpsc::unbounded_channel::<String>();
+        let (tx, mut client_response_rx) = mpsc::unbounded_channel::<String>();
+        let (client_tx, response_rx) = mpsc::unbounded_channel::<String>();
 
         let async_in = AsyncIn(rx);
         let async_out = AsyncOut(tx);
@@ -86,10 +88,22 @@ impl TestContext {
             server::start(async_in, async_out, snippets, unicode_input, home_dir).await
         });
 
+        let client = tokio::spawn(async move {
+            loop {
+                let Some(response) = client_response_rx.recv().await else {
+                    continue;
+                };
+                if client_tx.send(response).is_err() {
+                    tracing::error!("Failed to pass client response");
+                }
+            }
+        });
+
         Ok(Self {
             request_tx,
             response_rx,
             _server: server,
+            _client: client,
         })
     }
 
@@ -377,5 +391,134 @@ async fn paths() -> anyhow::Result<()> {
         vec!["~/scls-test/sub-folder"]
     );
 
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn citations() -> anyhow::Result<()> {
+    std::fs::create_dir_all("/tmp/scls-test-citation")?;
+
+    let doc = r#"
+---
+bibliography: "/tmp/scls-test-citation/test.bib" # could also be surrounded by brackets instead of quotation marks
+---
+
+# Heading      
+@b
+"#;
+
+    let bib = r#"
+@online{irfanullah_open_acces_global_south_2021,
+	author = {Irfanullah, Haseeb},
+	title = {{Open Access and Global South}},
+	subtitle = {It is More Than a Matter of Inclusion},
+	date = {2021-02-08},
+	urldate = {2024-08-04},
+	language = {english},
+	url = {https://web.archive.org/web/20240303223926/https://scholarlykitchen.sspnet.org/2021/01/28/open-access-and-global-south-it-is-more-than-a-matter-of-inclusion/},
+}
+
+@article{brainard_pay-to-publ_model_open_acces_2024,
+	author = {Brainard, Jeffrey},
+	title = {{Is the pay-to-publish model for open access pricing scientists
+	         out?}},
+	journal = {American Association for the Advancement of Science},
+	volume = {385},
+	issue = {6708},
+	date = {2024-08-01},
+	urldate = {2024-08-04},
+	doi = {10.1126/science.zp80ua9},
+}
+
+@article{brembs_replacing_academic_journals_2023,
+	author = {Brembs, Björn and Huneman, Philippe and Schönbrodt, Felix and
+	          Nilsonne, Gustav and Susi, Toma and Siems, Renke and Perakakis,
+	          Pandelis and Trachana, Varvara and Ma, Lai and Rodriguez-Cuadrado,
+	          Sara},
+	title = {Replacing academic journals},
+	year = {2023},
+	month = may,
+	doi = {10.5281/zenodo.7974116},
+} 
+    "#;
+
+    std::fs::write("/tmp/scls-test-citation/test.bib", bib)?;
+
+    let mut context = TestContext::new(Vec::new(), HashMap::new(), String::new()).await?;
+    context.initialize().await?;
+
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "feature_citations": true,
+                    "feature_words": false,
+                    "feature_snippets": false,
+                    "feature_unicode_input": false,
+                    "feature_path": false,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
+    context
+        .send_all(&[
+            &serde_json::to_string(&serde_json::json!(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "textDocument/didOpen",
+                    "params": {
+                        "textDocument": {
+                            "languageId": "markdown",
+                            "text": doc,
+                            "uri": "file:///tmp/doc.md",
+                            "version":0
+                        }
+                    }
+                }
+            ))?,
+            &serde_json::to_string(&serde_json::json!(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "textDocument/completion",
+                    "params": {
+                        "position": {
+                            "character": 2,
+                            "line": doc.lines().count() - 1
+                        },
+                        "textDocument": {
+                            "uri": "file:///tmp/doc.md"
+                        }
+                    }
+                }
+            ))?,
+        ])
+        .await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(items.len(), 2);
+
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| match i.text_edit {
+                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            "brainard_pay-to-publ_model_open_acces_2024",
+            "brembs_replacing_academic_journals_2023"
+        ]
+    );
     Ok(())
 }
