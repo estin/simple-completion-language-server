@@ -690,7 +690,7 @@ impl BackendState {
     ) -> impl Iterator<Item = CompletionItem> {
         let mut items: Vec<CompletionItem> = Vec::new();
 
-        tracing::trace!("Citation word_prefix: {word_prefix}, chars_prefix: {chars_prefix}");
+        tracing::debug!("Citation word_prefix: {word_prefix}, chars_prefix: {chars_prefix}");
 
         let Some(re) = &self.citation_bibliography_re else {
             tracing::warn!("Citation bibliography regex empty or invalid");
@@ -698,10 +698,12 @@ impl BackendState {
         };
 
         let Some(slice) = doc.text.get_slice(..) else {
+            tracing::warn!("Failed to get rope slice");
             return Vec::new().into_iter();
         };
 
         let Some(text) = slice.as_str() else {
+            tracing::warn!("Failed to repr slice as str");
             return Vec::new().into_iter();
         };
 
@@ -711,6 +713,7 @@ impl BackendState {
             }
 
             // TODO read and parse only if file changed
+            tracing::debug!("Citation try to read: {path}");
             let bib = match std::fs::read_to_string(path) {
                 Err(e) => {
                     tracing::error!("Failed to read file {path}: {e}");
@@ -730,6 +733,11 @@ impl BackendState {
             items.extend(
                 bib.iter()
                     .filter_map(|b| {
+                        tracing::debug!(
+                            "Citation from file: {path} prefix: {word_prefix} key: {} - match: {}",
+                            b.key,
+                            starts_with(&b.key, word_prefix),
+                        );
                         if !starts_with(&b.key, word_prefix) {
                             return None;
                         }
