@@ -8,6 +8,7 @@ use std::io::prelude::*;
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::lsp_types::*;
 
+use regex_cursor::{engines::meta::Regex, Input, RopeyCursor};
 pub mod server;
 pub mod snippets;
 
@@ -172,7 +173,7 @@ pub struct BackendState {
     unicode_input: HashMap<String, String>,
     max_unicude_input_prefix_len: usize,
     rx: mpsc::UnboundedReceiver<BackendRequest>,
-    citation_bibliography_re: Option<regex::Regex>,
+    citation_bibliography_re: Option<Regex>,
 }
 
 impl BackendState {
@@ -188,14 +189,12 @@ impl BackendState {
             request_tx,
             BackendState {
                 home_dir,
-                citation_bibliography_re: regex::Regex::new(
-                    &settings.citation_bibfile_extract_regexp,
-                )
-                .map_err(|e| {
-                    tracing::error!("Invalid citation bibliography regex: {e}");
-                    e
-                })
-                .ok(),
+                citation_bibliography_re: Regex::new(&settings.citation_bibfile_extract_regexp)
+                    .map_err(|e| {
+                        tracing::error!("Invalid citation bibliography regex: {e}");
+                        e
+                    })
+                    .ok(),
                 settings,
                 docs: HashMap::new(),
                 snippets,
@@ -273,9 +272,8 @@ impl BackendState {
             .settings
             .apply_partial_settings(serde_json::from_value(params.settings)?);
 
-        self.citation_bibliography_re = Some(regex::Regex::new(
-            &self.settings.citation_bibfile_extract_regexp,
-        )?);
+        self.citation_bibliography_re =
+            Some(Regex::new(&self.settings.citation_bibfile_extract_regexp)?);
 
         Ok(())
     }
@@ -702,19 +700,33 @@ impl BackendState {
             return Vec::new().into_iter();
         };
 
-        let Some(text) = slice.as_str() else {
-            tracing::warn!("Failed to repr slice as str");
-            return Vec::new().into_iter();
-        };
+        let cursor = RopeyCursor::new(slice);
 
-        for (_, [path]) in re.captures_iter(text).map(|c| c.extract()) {
+        for span in re
+            .captures_iter(Input::new(cursor))
+            .filter_map(|c| c.get_group(1))
+        {
             if items.len() >= self.settings.max_completion_items {
                 break;
             }
 
+            let Some(path) = slice.get_slice(span.start..span.end) else {
+                tracing::error!("Failed to get path by span");
+                continue;
+            };
+
+            // TODO any ways get &str from whole RopeSlice
+            let path = path.to_string();
+
+            let path = if path.contains("~") {
+                path.replacen('~', &self.home_dir, 1)
+            } else {
+                path
+            };
+
             // TODO read and parse only if file changed
             tracing::debug!("Citation try to read: {path}");
-            let bib = match std::fs::read_to_string(path) {
+            let bib = match std::fs::read_to_string(&path) {
                 Err(e) => {
                     tracing::error!("Failed to read file {path}: {e}");
                     continue;
