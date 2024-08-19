@@ -839,69 +839,56 @@ impl BackendState {
                         continue;
                     };
 
-                    let results: Vec<CompletionItem> = Vec::new()
-                        .into_iter()
-                        .chain(
-                            if let Some(chars_prefix) = chars_prefix {
-                                if self.settings.feature_citations
-                                    & chars_prefix.contains(&self.settings.citation_prefix_trigger)
-                                {
-                                    Some(self.citations(
-                                        prefix.unwrap_or_default(),
-                                        chars_prefix,
-                                        doc,
-                                        &params,
-                                    ))
-                                } else {
-                                    None
-                                }
-                            } else {
-                                None
-                            }
+                    let Some(chars_prefix) = chars_prefix else {
+                        if tx
+                            .send(Err(anyhow::anyhow!("Failed to get char prefix")))
+                            .is_err()
+                        {
+                            tracing::error!("Error on send completion response");
+                        }
+                        continue;
+                    };
+
+                    let results: Vec<CompletionItem> = if self.settings.feature_citations
+                        & chars_prefix.contains(&self.settings.citation_prefix_trigger)
+                    {
+                        self.citations(prefix.unwrap_or_default(), chars_prefix, doc, &params)
+                            .collect()
+                    } else {
+                        Vec::new()
                             .into_iter()
-                            .flatten(),
-                        )
-                        .chain(
-                            if let Some(chars_prefix) = chars_prefix {
+                            .chain(
                                 if self.settings.feature_snippets & self.settings.snippets_first {
                                     Some(self.snippets(chars_prefix, doc, &params))
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                            .into_iter()
-                            .flatten(),
-                        )
-                        .chain(
-                            if let Some(prefix) = prefix {
-                                if self.settings.feature_words {
-                                    Some(self.words(prefix, doc))
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .chain(
+                                if let Some(prefix) = prefix {
+                                    if self.settings.feature_words {
+                                        Some(self.words(prefix, doc))
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                            .into_iter()
-                            .flatten(),
-                        )
-                        .chain(
-                            if let Some(chars_prefix) = chars_prefix {
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .chain(
                                 if self.settings.feature_snippets & !self.settings.snippets_first {
                                     Some(self.snippets(chars_prefix, doc, &params))
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                            .into_iter()
-                            .flatten(),
-                        )
-                        .chain(
-                            if let Some(chars_prefix) = chars_prefix {
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .chain(
                                 if self.settings.feature_unicode_input {
                                     Some(self.unicode_input(
                                         prefix.unwrap_or_default(),
@@ -911,14 +898,10 @@ impl BackendState {
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                            .into_iter()
-                            .flatten(),
-                        )
-                        .chain(
-                            if let Some(chars_prefix) = chars_prefix {
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .chain(
                                 if self.settings.feature_paths {
                                     Some(self.paths(
                                         prefix.unwrap_or_default(),
@@ -928,13 +911,11 @@ impl BackendState {
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                            .into_iter()
-                            .flatten(),
-                        )
-                        .collect();
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .collect()
+                    };
 
                     tracing::debug!(
                         "completion request took {:.2}ms with {} result items",
