@@ -140,6 +140,7 @@ $ simple-completion-language-server validate-unicode-input
 
 ### Similar projects
 
+- [erasin/hx-lsp](https://github.com/erasin/hx-lsp)
 - [metafates/buffer-language-server](https://github.com/metafates/buffer-language-server)
 - [rajasegar/helix-snippets-ls](https://github.com/rajasegar/helix-snippets-ls)
 - [quantonganh/snippets-ls](https://github.com/quantonganh/snippets-ls)
