@@ -60,7 +60,7 @@ impl Default for BackendSettings {
             max_chars_prefix_len: 64,
             snippets_first: false,
             citation_prefix_trigger: "@".to_string(),
-            citation_bibfile_extract_regexp: r#"bibliography:\s*['"\[]*([~\w\./\\-]*)['"\]]*.*"#
+            citation_bibfile_extract_regexp: r#"bibliography:\s*['"\[]*([~\w\./\\-]*)['"\]]"#
                 .to_string(),
             feature_words: true,
             feature_snippets: true,
@@ -710,7 +710,7 @@ impl BackendState {
                 break;
             }
 
-            let Some(path) = slice.get_slice(span.start..span.end) else {
+            let Some(path) = slice.get_byte_slice(span.start..span.end) else {
                 tracing::error!("Failed to get path by span");
                 continue;
             };
