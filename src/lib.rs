@@ -1,6 +1,5 @@
 use aho_corasick::AhoCorasick;
 use anyhow::Result;
-use biblatex::Type;
 use ropey::Rope;
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -9,7 +8,11 @@ use std::io::prelude::*;
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::lsp_types::*;
 
+#[cfg(feature = "citation")]
+use biblatex::Type;
+#[cfg(feature = "citation")]
 use regex_cursor::{engines::meta::Regex, Input, RopeyCursor};
+
 pub mod server;
 pub mod snippets;
 
@@ -174,6 +177,8 @@ pub struct BackendState {
     unicode_input: HashMap<String, String>,
     max_unicude_input_prefix_len: usize,
     rx: mpsc::UnboundedReceiver<BackendRequest>,
+
+    #[cfg(feature = "citation")]
     citation_bibliography_re: Option<Regex>,
 }
 
@@ -190,6 +195,7 @@ impl BackendState {
             request_tx,
             BackendState {
                 home_dir,
+                #[cfg(feature = "citation")]
                 citation_bibliography_re: Regex::new(&settings.citation_bibfile_extract_regexp)
                     .map_err(|e| {
                         tracing::error!("Invalid citation bibliography regex: {e}");
@@ -273,8 +279,11 @@ impl BackendState {
             .settings
             .apply_partial_settings(serde_json::from_value(params.settings)?);
 
-        self.citation_bibliography_re =
-            Some(Regex::new(&self.settings.citation_bibfile_extract_regexp)?);
+        #[cfg(feature = "citation")]
+        {
+            self.citation_bibliography_re =
+                Some(Regex::new(&self.settings.citation_bibfile_extract_regexp)?);
+        };
 
         Ok(())
     }
@@ -680,6 +689,7 @@ impl BackendState {
             .into_iter()
     }
 
+    #[cfg(feature = "citation")]
     fn citations<'a>(
         &'a self,
         word_prefix: &str,
@@ -882,12 +892,7 @@ impl BackendState {
                         continue;
                     };
 
-                    let results: Vec<CompletionItem> = if self.settings.feature_citations
-                        & chars_prefix.contains(&self.settings.citation_prefix_trigger)
-                    {
-                        self.citations(prefix.unwrap_or_default(), chars_prefix, doc, &params)
-                            .collect()
-                    } else {
+                    let base_completion = || {
                         Vec::new()
                             .into_iter()
                             .chain(
@@ -949,6 +954,19 @@ impl BackendState {
                             )
                             .collect()
                     };
+
+                    #[cfg(feature = "citation")]
+                    let results: Vec<CompletionItem> = if self.settings.feature_citations
+                        & chars_prefix.contains(&self.settings.citation_prefix_trigger)
+                    {
+                        self.citations(prefix.unwrap_or_default(), chars_prefix, doc, &params)
+                            .collect()
+                    } else {
+                        base_completion()
+                    };
+
+                    #[cfg(not(feature = "citation"))]
+                    let results: Vec<CompletionItem> = base_completion();
 
                     tracing::debug!(
                         "completion request took {:.2}ms with {} result items",

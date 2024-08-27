@@ -7,6 +7,10 @@ edition = "2021"
 name = "simple-completion-language-server"
 path = "src/main.rs"
 
+[features]
+default = []
+citation = ["regex-cursor", "biblatex"]
+
 [dependencies]
 anyhow = "1.0"
 ropey = "1.6"
@@ -21,8 +25,8 @@ etcetera = "0.8"
 xshell = "0.2"
 
 # citation completion
-regex-cursor = "0.1"
-biblatex = "0.9"
+regex-cursor = { version = "0.1", optional = true }
+biblatex = { version = "0.9", optional = true }
 
 tracing = "0.1"
 tracing-subscriber = { version =  "0.3", features = ["env-filter", "fmt"] }
