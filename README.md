@@ -143,7 +143,7 @@ $ simple-completion-language-server validate-unicode-input
 Citation keys completion from bibliography file declared in current document.
 When completion is triggered with a prefixed `@` (which can be configured via `citation_prefix_trigger` settings), scls will try to extract the bibliography file path from the current document (regex can be configured via the `citation_bibfile_extract_regexp` setting) to parse and use it as a completion source.
 
-To enable this feature, scls must be compiled with the `--feature citation` flag. 
+To enable this feature, scls must be compiled with the `--features citation` flag. 
 
 ```console
 $ cargo install --features citation --git https://github.com/estin/simple-completion-language-server.git
