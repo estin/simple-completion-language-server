@@ -154,7 +154,7 @@ And initialize scls with `feature_citations = true`.
 ```toml
 [language-server.scls.config]
 max_completion_items = 20
-feature_citations = true 
+feature_citations = true
 ```
 
 For more info, please check https://github.com/estin/simple-completion-language-server/issues/78
