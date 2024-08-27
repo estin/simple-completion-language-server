@@ -41,6 +41,7 @@ feature_words = true          # enable completion by word
 feature_snippets = true       # enable snippets
 feature_unicode_input = true  # enable "unicode input"
 feature_paths = true          # enable path completion
+feature_citations = false     # enable citation completion (only on `citation` feature enabled)
 
 
 # write logs to /tmp/completion.log
@@ -137,6 +138,26 @@ Validate unicode input config
 $ simple-completion-language-server validate-unicode-input
 ```
 
+### Citation completion
+
+Citation keys completion from bibliography file declared in current document.
+When completion is triggered with a prefixed `@` (which can be configured via `citation_prefix_trigger` settings), scls will try to extract the bibliography file path from the current document (regex can be configured via the `citation_bibfile_extract_regexp` setting) to parse and use it as a completion source.
+
+To enable this feature, scls must be compiled with the `--feature citation` flag. 
+
+```console
+$ cargo install --feature citation --git https://github.com/estin/simple-completion-language-server.git
+```
+
+And initialize scls with `feature_citations = true`.
+
+```toml
+[language-server.scls.config]
+max_completion_items = 20
+feature_citations = true 
+```
+
+For more info, please check https://github.com/estin/simple-completion-language-server/issues/78
 
 ### Similar projects
 
