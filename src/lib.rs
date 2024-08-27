@@ -1,5 +1,6 @@
 use aho_corasick::AhoCorasick;
 use anyhow::Result;
+use biblatex::Type;
 use ropey::Rope;
 use serde::Deserialize;
 use std::borrow::Cow;
@@ -767,6 +768,33 @@ impl BackendState {
                                 character: replace_end,
                             },
                         };
+                        let documentation = {
+                            let entry_type = b.entry_type.to_string();
+                            let title = b
+                                .title()
+                                .ok()?
+                                .iter()
+                                .map(|chunk| chunk.v.get())
+                                .collect::<Vec<_>>()
+                                .join("");
+                            let authors = b
+                                .author()
+                                .ok()?
+                                .into_iter()
+                                .map(|person| person.to_string())
+                                .collect::<Vec<_>>()
+                                .join(",");
+                            let date = match b.date().ok()? {
+                                biblatex::PermissiveType::Typed(date) => date.to_chunks(),
+                                biblatex::PermissiveType::Chunks(v) => v,
+                            }
+                            .iter()
+                            .map(|chunk| chunk.v.get())
+                            .collect::<Vec<_>>()
+                            .join("");
+
+                            Some(format!("# {title:?}\n*{authors}*\n\n{entry_type}, {date}"))
+                        };
                         Some(CompletionItem {
                             label: format!("@{}", b.key),
                             filter_text: Some(word_prefix.to_string()),
@@ -780,7 +808,12 @@ impl BackendState {
                             )),
                             documentation: Some(Documentation::MarkupContent(MarkupContent {
                                 kind: MarkupKind::Markdown,
-                                value: format!("```{}\n```", b.to_biblatex_string()),
+                                value: documentation.unwrap_or_else(|| {
+                                    format!(
+                                        "'''{}'''\n\n*fallback to biblatex format*",
+                                        b.to_biblatex_string()
+                                    )
+                                }),
                             })),
                             ..Default::default()
                         })
