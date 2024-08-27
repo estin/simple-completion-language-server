@@ -146,7 +146,7 @@ When completion is triggered with a prefixed `@` (which can be configured via `c
 To enable this feature, scls must be compiled with the `--feature citation` flag. 
 
 ```console
-$ cargo install --feature citation --git https://github.com/estin/simple-completion-language-server.git
+$ cargo install --features citation --git https://github.com/estin/simple-completion-language-server.git
 ```
 
 And initialize scls with `feature_citations = true`.
