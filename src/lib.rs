@@ -8,6 +8,11 @@ use std::io::prelude::*;
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::lsp_types::*;
 
+#[cfg(feature = "citation")]
+use biblatex::Type;
+#[cfg(feature = "citation")]
+use regex_cursor::{engines::meta::Regex, Input, RopeyCursor};
+
 pub mod server;
 pub mod snippets;
 
@@ -25,11 +30,15 @@ pub struct BackendSettings {
     pub max_completion_items: usize,
     pub max_chars_prefix_len: usize,
     pub snippets_first: bool,
+    // citation
+    pub citation_prefix_trigger: String,
+    pub citation_bibfile_extract_regexp: String,
     // feature flags
     pub feature_words: bool,
     pub feature_snippets: bool,
     pub feature_unicode_input: bool,
     pub feature_paths: bool,
+    pub feature_citations: bool,
 }
 
 #[derive(Deserialize)]
@@ -37,10 +46,15 @@ pub struct PartialBackendSettings {
     pub max_completion_items: Option<usize>,
     pub max_path_chars: Option<usize>,
     pub snippets_first: Option<bool>,
+    // citation
+    pub citation_prefix_trigger: Option<String>,
+    pub citation_bibfile_extract_regexp: Option<String>,
+    // feature flags
     pub feature_words: Option<bool>,
     pub feature_snippets: Option<bool>,
     pub feature_unicode_input: Option<bool>,
     pub feature_paths: Option<bool>,
+    pub feature_citations: Option<bool>,
 }
 
 impl Default for BackendSettings {
@@ -49,10 +63,14 @@ impl Default for BackendSettings {
             max_completion_items: 20,
             max_chars_prefix_len: 64,
             snippets_first: false,
+            citation_prefix_trigger: "@".to_string(),
+            citation_bibfile_extract_regexp: r#"bibliography:\s*['"\[]*([~\w\./\\-]*)['"\]]*"#
+                .to_string(),
             feature_words: true,
             feature_snippets: true,
             feature_unicode_input: true,
             feature_paths: true,
+            feature_citations: true,
         }
     }
 }
@@ -65,12 +83,21 @@ impl BackendSettings {
                 .unwrap_or(self.max_completion_items),
             max_chars_prefix_len: settings.max_path_chars.unwrap_or(self.max_chars_prefix_len),
             snippets_first: settings.snippets_first.unwrap_or(self.snippets_first),
+            citation_prefix_trigger: settings
+                .citation_prefix_trigger
+                .clone()
+                .unwrap_or_else(|| self.citation_prefix_trigger.to_owned()),
+            citation_bibfile_extract_regexp: settings
+                .citation_prefix_trigger
+                .clone()
+                .unwrap_or_else(|| self.citation_bibfile_extract_regexp.to_owned()),
             feature_words: settings.feature_words.unwrap_or(self.feature_words),
             feature_snippets: settings.feature_snippets.unwrap_or(self.feature_snippets),
             feature_unicode_input: settings
                 .feature_unicode_input
                 .unwrap_or(self.feature_unicode_input),
             feature_paths: settings.feature_paths.unwrap_or(self.feature_paths),
+            feature_citations: settings.feature_citations.unwrap_or(self.feature_citations),
         }
     }
 }
@@ -150,6 +177,9 @@ pub struct BackendState {
     unicode_input: HashMap<String, String>,
     max_unicude_input_prefix_len: usize,
     rx: mpsc::UnboundedReceiver<BackendRequest>,
+
+    #[cfg(feature = "citation")]
+    citation_bibliography_re: Option<Regex>,
 }
 
 impl BackendState {
@@ -160,11 +190,19 @@ impl BackendState {
     ) -> (mpsc::UnboundedSender<BackendRequest>, Self) {
         let (request_tx, request_rx) = mpsc::unbounded_channel::<BackendRequest>();
 
+        let settings = BackendSettings::default();
         (
             request_tx,
             BackendState {
                 home_dir,
-                settings: BackendSettings::default(),
+                #[cfg(feature = "citation")]
+                citation_bibliography_re: Regex::new(&settings.citation_bibfile_extract_regexp)
+                    .map_err(|e| {
+                        tracing::error!("Invalid citation bibliography regex: {e}");
+                        e
+                    })
+                    .ok(),
+                settings,
                 docs: HashMap::new(),
                 snippets,
                 max_unicude_input_prefix_len: unicode_input
@@ -240,6 +278,13 @@ impl BackendState {
         self.settings = self
             .settings
             .apply_partial_settings(serde_json::from_value(params.settings)?);
+
+        #[cfg(feature = "citation")]
+        {
+            self.citation_bibliography_re =
+                Some(Regex::new(&self.settings.citation_bibfile_extract_regexp)?);
+        };
+
         Ok(())
     }
 
@@ -644,6 +689,152 @@ impl BackendState {
             .into_iter()
     }
 
+    #[cfg(feature = "citation")]
+    fn citations<'a>(
+        &'a self,
+        word_prefix: &str,
+        chars_prefix: &str,
+        doc: &'a Document,
+        params: &CompletionParams,
+    ) -> impl Iterator<Item = CompletionItem> {
+        let mut items: Vec<CompletionItem> = Vec::new();
+
+        tracing::debug!("Citation word_prefix: {word_prefix}, chars_prefix: {chars_prefix}");
+
+        let Some(re) = &self.citation_bibliography_re else {
+            tracing::warn!("Citation bibliography regex empty or invalid");
+            return Vec::new().into_iter();
+        };
+
+        let Some(slice) = doc.text.get_slice(..) else {
+            tracing::warn!("Failed to get rope slice");
+            return Vec::new().into_iter();
+        };
+
+        let cursor = RopeyCursor::new(slice);
+
+        for span in re
+            .captures_iter(Input::new(cursor))
+            .filter_map(|c| c.get_group(1))
+        {
+            if items.len() >= self.settings.max_completion_items {
+                break;
+            }
+
+            let Some(path) = slice.get_byte_slice(span.start..span.end) else {
+                tracing::error!("Failed to get path by span");
+                continue;
+            };
+
+            // TODO any ways get &str from whole RopeSlice
+            let path = path.to_string();
+
+            let path = if path.contains("~") {
+                path.replacen('~', &self.home_dir, 1)
+            } else {
+                path
+            };
+
+            // TODO read and parse only if file changed
+            tracing::debug!("Citation try to read: {path}");
+            let bib = match std::fs::read_to_string(&path) {
+                Err(e) => {
+                    tracing::error!("Failed to read file {path}: {e}");
+                    continue;
+                }
+                Ok(r) => r,
+            };
+
+            let bib = match biblatex::Bibliography::parse(&bib) {
+                Err(e) => {
+                    tracing::error!("Failed to parse bib file {path}: {e}");
+                    continue;
+                }
+                Ok(r) => r,
+            };
+
+            items.extend(
+                bib.iter()
+                    .filter_map(|b| {
+                        tracing::debug!(
+                            "Citation from file: {path} prefix: {word_prefix} key: {} - match: {}",
+                            b.key,
+                            starts_with(&b.key, word_prefix),
+                        );
+                        if !starts_with(&b.key, word_prefix) {
+                            return None;
+                        }
+                        let line = params.text_document_position.position.line;
+                        let start = params.text_document_position.position.character
+                            - word_prefix.len() as u32;
+                        let replace_end = params.text_document_position.position.character;
+                        let range = Range {
+                            start: Position {
+                                line,
+                                character: start,
+                            },
+                            end: Position {
+                                line,
+                                character: replace_end,
+                            },
+                        };
+                        let documentation = {
+                            let entry_type = b.entry_type.to_string();
+                            let title = b
+                                .title()
+                                .ok()?
+                                .iter()
+                                .map(|chunk| chunk.v.get())
+                                .collect::<Vec<_>>()
+                                .join("");
+                            let authors = b
+                                .author()
+                                .ok()?
+                                .into_iter()
+                                .map(|person| person.to_string())
+                                .collect::<Vec<_>>()
+                                .join(",");
+                            let date = match b.date().ok()? {
+                                biblatex::PermissiveType::Typed(date) => date.to_chunks(),
+                                biblatex::PermissiveType::Chunks(v) => v,
+                            }
+                            .iter()
+                            .map(|chunk| chunk.v.get())
+                            .collect::<Vec<_>>()
+                            .join("");
+
+                            Some(format!("# {title:?}\n*{authors}*\n\n{entry_type}, {date}"))
+                        };
+                        Some(CompletionItem {
+                            label: format!("@{}", b.key),
+                            filter_text: Some(word_prefix.to_string()),
+                            kind: Some(CompletionItemKind::REFERENCE),
+                            text_edit: Some(CompletionTextEdit::InsertAndReplace(
+                                InsertReplaceEdit {
+                                    replace: range,
+                                    insert: range,
+                                    new_text: b.key.to_string(),
+                                },
+                            )),
+                            documentation: Some(Documentation::MarkupContent(MarkupContent {
+                                kind: MarkupKind::Markdown,
+                                value: documentation.unwrap_or_else(|| {
+                                    format!(
+                                        "'''{}'''\n\n*fallback to biblatex format*",
+                                        b.to_biblatex_string()
+                                    )
+                                }),
+                            })),
+                            ..Default::default()
+                        })
+                    })
+                    .take(self.settings.max_completion_items - items.len()),
+            );
+        }
+
+        items.into_iter()
+    }
+
     pub async fn start(mut self) {
         loop {
             let Some(cmd) = self.rx.recv().await else {
@@ -691,49 +882,51 @@ impl BackendState {
                         continue;
                     };
 
-                    let results: Vec<CompletionItem> = Vec::new()
-                        .into_iter()
-                        .chain(
-                            if let Some(chars_prefix) = chars_prefix {
+                    let Some(chars_prefix) = chars_prefix else {
+                        if tx
+                            .send(Err(anyhow::anyhow!("Failed to get char prefix")))
+                            .is_err()
+                        {
+                            tracing::error!("Error on send completion response");
+                        }
+                        continue;
+                    };
+
+                    let base_completion = || {
+                        Vec::new()
+                            .into_iter()
+                            .chain(
                                 if self.settings.feature_snippets & self.settings.snippets_first {
                                     Some(self.snippets(chars_prefix, doc, &params))
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                            .into_iter()
-                            .flatten(),
-                        )
-                        .chain(
-                            if let Some(prefix) = prefix {
-                                if self.settings.feature_words {
-                                    Some(self.words(prefix, doc))
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .chain(
+                                if let Some(prefix) = prefix {
+                                    if self.settings.feature_words {
+                                        Some(self.words(prefix, doc))
+                                    } else {
+                                        None
+                                    }
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                            .into_iter()
-                            .flatten(),
-                        )
-                        .chain(
-                            if let Some(chars_prefix) = chars_prefix {
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .chain(
                                 if self.settings.feature_snippets & !self.settings.snippets_first {
                                     Some(self.snippets(chars_prefix, doc, &params))
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                            .into_iter()
-                            .flatten(),
-                        )
-                        .chain(
-                            if let Some(chars_prefix) = chars_prefix {
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .chain(
                                 if self.settings.feature_unicode_input {
                                     Some(self.unicode_input(
                                         prefix.unwrap_or_default(),
@@ -743,14 +936,10 @@ impl BackendState {
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                            .into_iter()
-                            .flatten(),
-                        )
-                        .chain(
-                            if let Some(chars_prefix) = chars_prefix {
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .chain(
                                 if self.settings.feature_paths {
                                     Some(self.paths(
                                         prefix.unwrap_or_default(),
@@ -760,13 +949,24 @@ impl BackendState {
                                 } else {
                                     None
                                 }
-                            } else {
-                                None
-                            }
-                            .into_iter()
-                            .flatten(),
-                        )
-                        .collect();
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .collect()
+                    };
+
+                    #[cfg(feature = "citation")]
+                    let results: Vec<CompletionItem> = if self.settings.feature_citations
+                        & chars_prefix.contains(&self.settings.citation_prefix_trigger)
+                    {
+                        self.citations(prefix.unwrap_or_default(), chars_prefix, doc, &params)
+                            .collect()
+                    } else {
+                        base_completion()
+                    };
+
+                    #[cfg(not(feature = "citation"))]
+                    let results: Vec<CompletionItem> = base_completion();
 
                     tracing::debug!(
                         "completion request took {:.2}ms with {} result items",
