@@ -283,6 +283,65 @@ async fn snippets() -> anyhow::Result<()> {
 }
 
 #[test_log::test(tokio::test)]
+async fn snippets_inline_by_word_tail() -> anyhow::Result<()> {
+    let mut context = TestContext::new(
+        vec![snippets::Snippet {
+            scope: Some(vec!["python".to_string()]),
+            prefix: "sq".to_string(),
+            body: "^2".to_string(),
+            description: None,
+        }],
+        HashMap::new(),
+        String::new(),
+    )
+    .await?;
+    context.initialize().await?;
+
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "snippets_inline_by_word_tail": true,
+                    "feature_snippets": true,
+                    "feature_citations": false,
+                    "feature_words": false,
+                    "feature_unicode_input": false,
+                    "feature_path": false,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"xsq","uri":"file:///tmp/main.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":3,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| i.text_edit.and_then(|l| match l {
+                lsp_types::CompletionTextEdit::InsertAndReplace(t) => Some(t.new_text),
+                _ => None,
+            }))
+            .collect::<Vec<_>>(),
+        vec!["^2"]
+    );
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
 async fn unicode_input() -> anyhow::Result<()> {
     let mut context = TestContext::new(
         Vec::new(),

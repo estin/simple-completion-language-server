@@ -30,6 +30,7 @@ pub struct BackendSettings {
     pub max_completion_items: usize,
     pub max_chars_prefix_len: usize,
     pub snippets_first: bool,
+    pub snippets_inline_by_word_tail: bool,
     // citation
     pub citation_prefix_trigger: String,
     pub citation_bibfile_extract_regexp: String,
@@ -46,6 +47,7 @@ pub struct PartialBackendSettings {
     pub max_completion_items: Option<usize>,
     pub max_path_chars: Option<usize>,
     pub snippets_first: Option<bool>,
+    pub snippets_inline_by_word_tail: Option<bool>,
     // citation
     pub citation_prefix_trigger: Option<String>,
     pub citation_bibfile_extract_regexp: Option<String>,
@@ -63,6 +65,7 @@ impl Default for BackendSettings {
             max_completion_items: 20,
             max_chars_prefix_len: 64,
             snippets_first: false,
+            snippets_inline_by_word_tail: false,
             citation_prefix_trigger: "@".to_string(),
             citation_bibfile_extract_regexp: r#"bibliography:\s*['"\[]*([~\w\./\\-]*)['"\]]*"#
                 .to_string(),
@@ -83,6 +86,9 @@ impl BackendSettings {
                 .unwrap_or(self.max_completion_items),
             max_chars_prefix_len: settings.max_path_chars.unwrap_or(self.max_chars_prefix_len),
             snippets_first: settings.snippets_first.unwrap_or(self.snippets_first),
+            snippets_inline_by_word_tail: settings
+                .snippets_inline_by_word_tail
+                .unwrap_or(self.snippets_inline_by_word_tail),
             citation_prefix_trigger: settings
                 .citation_prefix_trigger
                 .clone()
@@ -176,6 +182,9 @@ pub struct BackendState {
     snippets: Vec<Snippet>,
     unicode_input: HashMap<String, String>,
     max_unicude_input_prefix_len: usize,
+    min_unicude_input_prefix_len: usize,
+    max_snippet_input_prefix_len: usize,
+    min_snippet_input_prefix_len: usize,
     rx: mpsc::UnboundedReceiver<BackendRequest>,
 
     #[cfg(feature = "citation")]
@@ -202,14 +211,30 @@ impl BackendState {
                         e
                     })
                     .ok(),
+
                 settings,
                 docs: HashMap::new(),
-                snippets,
                 max_unicude_input_prefix_len: unicode_input
                     .keys()
                     .map(|s| s.len())
                     .max()
                     .unwrap_or_default(),
+                min_unicude_input_prefix_len: unicode_input
+                    .keys()
+                    .map(|s| s.len())
+                    .min()
+                    .unwrap_or_default(),
+                max_snippet_input_prefix_len: snippets
+                    .iter()
+                    .map(|s| s.prefix.len())
+                    .max()
+                    .unwrap_or_default(),
+                min_snippet_input_prefix_len: snippets
+                    .iter()
+                    .map(|s| s.prefix.len())
+                    .min()
+                    .unwrap_or_default(),
+                snippets,
                 unicode_input,
                 rx: request_rx,
             },
@@ -450,6 +475,8 @@ impl BackendState {
     fn snippets<'a>(
         &'a self,
         prefix: &'a str,
+        filter_text_prefix: &'a str,
+        exact_match: bool,
         doc: &'a Document,
         params: &'a CompletionParams,
     ) -> impl Iterator<Item = CompletionItem> + 'a {
@@ -461,7 +488,12 @@ impl BackendState {
                 } else {
                     true
                 };
-                filter_by_scope && starts_with(s.prefix.as_str(), prefix)
+                let matched = if exact_match {
+                    caseless::default_caseless_match_str(s.prefix.as_str(), prefix)
+                } else {
+                    starts_with(s.prefix.as_str(), prefix)
+                };
+                filter_by_scope && matched
             })
             .map(move |s| {
                 let line = params.text_document_position.position.line;
@@ -479,7 +511,7 @@ impl BackendState {
                 };
                 CompletionItem {
                     label: s.prefix.to_owned(),
-                    filter_text: Some(format!("{prefix}{}", s.prefix)),
+                    filter_text: Some(format!("{filter_text_prefix}{}", s.prefix)),
                     kind: Some(CompletionItemKind::SNIPPET),
                     detail: Some(s.body.to_string()),
                     documentation: Some(if let Some(description) = &s.description {
@@ -505,6 +537,35 @@ impl BackendState {
             .take(self.settings.max_completion_items)
     }
 
+    fn snippets_by_chars<'a>(
+        &'a self,
+        chars_prefix: &'a str,
+        doc: &'a Document,
+        params: &'a CompletionParams,
+    ) -> impl Iterator<Item = CompletionItem> + 'a {
+        let mut chars_snippets: Vec<CompletionItem> = Vec::new();
+
+        let start = if chars_prefix.len() > 10 {
+            chars_prefix.len() - self.max_snippet_input_prefix_len + 1
+        } else {
+            self.min_snippet_input_prefix_len
+        };
+
+        let l = chars_prefix.len();
+        for count in start..l {
+            let Some(start) = chars_prefix.char_indices().map(|(i, _)| i).nth(l - count) else {
+                continue;
+            };
+            let prefix = &chars_prefix[start..];
+            chars_snippets.extend(self.snippets(prefix, chars_prefix, true, doc, params));
+            if chars_snippets.len() >= self.settings.max_completion_items {
+                break;
+            }
+        }
+
+        chars_snippets.into_iter()
+    }
+
     fn unicode_input(
         &self,
         word_prefix: &str,
@@ -517,7 +578,7 @@ impl BackendState {
         let start = if chars_prefix.len() > self.max_unicude_input_prefix_len {
             chars_prefix.len() - self.max_unicude_input_prefix_len + 1
         } else {
-            1
+            self.min_unicude_input_prefix_len
         };
 
         let l = chars.len();
@@ -897,7 +958,13 @@ impl BackendState {
                             .into_iter()
                             .chain(
                                 if self.settings.feature_snippets & self.settings.snippets_first {
-                                    Some(self.snippets(chars_prefix, doc, &params))
+                                    Some(self.snippets(
+                                        chars_prefix,
+                                        chars_prefix,
+                                        false,
+                                        doc,
+                                        &params,
+                                    ))
                                 } else {
                                     None
                                 }
@@ -919,7 +986,24 @@ impl BackendState {
                             )
                             .chain(
                                 if self.settings.feature_snippets & !self.settings.snippets_first {
-                                    Some(self.snippets(chars_prefix, doc, &params))
+                                    Some(self.snippets(
+                                        chars_prefix,
+                                        chars_prefix,
+                                        false,
+                                        doc,
+                                        &params,
+                                    ))
+                                } else {
+                                    None
+                                }
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .chain(
+                                if self.settings.feature_snippets
+                                    & self.settings.snippets_inline_by_word_tail
+                                {
+                                    Some(self.snippets_by_chars(chars_prefix, doc, &params))
                                 } else {
                                     None
                                 }
