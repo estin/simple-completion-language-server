@@ -537,7 +537,7 @@ impl BackendState {
             .take(self.settings.max_completion_items)
     }
 
-    fn snippets_by_chars<'a>(
+    fn snippets_by_word_tail<'a>(
         &'a self,
         chars_prefix: &'a str,
         doc: &'a Document,
@@ -557,6 +557,9 @@ impl BackendState {
                 continue;
             };
             let prefix = &chars_prefix[start..];
+            if prefix.starts_with(" ") {
+                break;
+            }
             chars_snippets.extend(self.snippets(prefix, chars_prefix, true, doc, params));
             if chars_snippets.len() >= self.settings.max_completion_items {
                 break;
@@ -953,6 +956,18 @@ impl BackendState {
                         continue;
                     };
 
+                    if chars_prefix.is_empty() || chars_prefix.starts_with(' ') {
+                        if tx
+                            .send(Ok(BackendResponse::CompletionResponse(
+                                CompletionResponse::Array(Vec::new()),
+                            )))
+                            .is_err()
+                        {
+                            tracing::error!("Error on send completion response");
+                        }
+                        continue;
+                    };
+
                     let base_completion = || {
                         Vec::new()
                             .into_iter()
@@ -1003,7 +1018,7 @@ impl BackendState {
                                 if self.settings.feature_snippets
                                     & self.settings.snippets_inline_by_word_tail
                                 {
-                                    Some(self.snippets_by_chars(chars_prefix, doc, &params))
+                                    Some(self.snippets_by_word_tail(chars_prefix, doc, &params))
                                 } else {
                                     None
                                 }
