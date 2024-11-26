@@ -820,12 +820,13 @@ impl BackendState {
             items.extend(
                 bib.iter()
                     .filter_map(|b| {
+                        let matched = starts_with(&b.key, word_prefix);
                         tracing::debug!(
                             "Citation from file: {path} prefix: {word_prefix} key: {} - match: {}",
                             b.key,
-                            starts_with(&b.key, word_prefix),
+                            matched,
                         );
-                        if !starts_with(&b.key, word_prefix) {
+                        if !matched {
                             return None;
                         }
                         let line = params.text_document_position.position.line;
@@ -858,16 +859,30 @@ impl BackendState {
                                 .map(|person| person.to_string())
                                 .collect::<Vec<_>>()
                                 .join(",");
-                            let date = match b.date().ok()? {
-                                biblatex::PermissiveType::Typed(date) => date.to_chunks(),
-                                biblatex::PermissiveType::Chunks(v) => v,
-                            }
-                            .iter()
-                            .map(|chunk| chunk.v.get())
-                            .collect::<Vec<_>>()
-                            .join("");
 
-                            Some(format!("# {title:?}\n*{authors}*\n\n{entry_type}, {date}"))
+                            let date = match b.date() {
+                                Ok(d) => match d {
+                                    biblatex::PermissiveType::Typed(date) => date.to_chunks(),
+                                    biblatex::PermissiveType::Chunks(v) => v,
+                                }
+                                .iter()
+                                .map(|chunk| chunk.v.get())
+                                .collect::<Vec<_>>()
+                                .join(""),
+                                Err(e) => {
+                                    tracing::error!("On parse date field on entry {b:?}: {e}");
+                                    String::new()
+                                }
+                            };
+
+                            Some(format!(
+                                "# {title:?}\n*{authors}*\n\n{entry_type}{}",
+                                if date.is_empty() {
+                                    date
+                                } else {
+                                    format!(", {date}")
+                                }
+                            ))
                         };
                         Some(CompletionItem {
                             label: format!("@{}", b.key),
