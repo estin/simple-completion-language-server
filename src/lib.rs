@@ -988,13 +988,7 @@ impl BackendState {
                             .into_iter()
                             .chain(
                                 if self.settings.feature_snippets & self.settings.snippets_first {
-                                    Some(self.snippets(
-                                        chars_prefix,
-                                        chars_prefix,
-                                        false,
-                                        doc,
-                                        &params,
-                                    ))
+                                    Some(self.snippets(chars_prefix, "", false, doc, &params))
                                 } else {
                                     None
                                 }
@@ -1016,13 +1010,7 @@ impl BackendState {
                             )
                             .chain(
                                 if self.settings.feature_snippets & !self.settings.snippets_first {
-                                    Some(self.snippets(
-                                        chars_prefix,
-                                        chars_prefix,
-                                        false,
-                                        doc,
-                                        &params,
-                                    ))
+                                    Some(self.snippets(chars_prefix, "", false, doc, &params))
                                 } else {
                                     None
                                 }
