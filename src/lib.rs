@@ -141,7 +141,7 @@ impl<'a> RopeReader<'a> {
     }
 }
 
-impl<'a> std::io::Read for RopeReader<'a> {
+impl std::io::Read for RopeReader<'_> {
     fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
         match self.chunks.next() {
             Some(chunk) => buf.write(chunk.as_bytes()),
@@ -488,12 +488,14 @@ impl BackendState {
                 } else {
                     true
                 };
-                let matched = if exact_match {
+                if !filter_by_scope {
+                    return false;
+                }
+                if exact_match {
                     caseless::default_caseless_match_str(s.prefix.as_str(), prefix)
                 } else {
                     starts_with(s.prefix.as_str(), prefix)
-                };
-                filter_by_scope && matched
+                }
             })
             .map(move |s| {
                 let line = params.text_document_position.position.line;
@@ -511,7 +513,11 @@ impl BackendState {
                 };
                 CompletionItem {
                     label: s.prefix.to_owned(),
-                    filter_text: Some(format!("{filter_text_prefix}{}", s.prefix)),
+                    filter_text: Some(if filter_text_prefix.is_empty() {
+                        s.prefix.to_string()
+                    } else {
+                        filter_text_prefix.to_string()
+                    }),
                     kind: Some(CompletionItemKind::SNIPPET),
                     detail: Some(s.body.to_string()),
                     documentation: Some(if let Some(description) = &s.description {
@@ -987,10 +993,15 @@ impl BackendState {
                         Vec::new()
                             .into_iter()
                             .chain(
-                                if self.settings.feature_snippets & self.settings.snippets_first {
-                                    Some(self.snippets(chars_prefix, "", false, doc, &params))
-                                } else {
-                                    None
+                                match (
+                                    self.settings.feature_snippets,
+                                    self.settings.snippets_first,
+                                    prefix,
+                                ) {
+                                    (true, true, Some(prefix)) => {
+                                        Some(self.snippets(prefix, "", false, doc, &params))
+                                    }
+                                    _ => None,
                                 }
                                 .into_iter()
                                 .flatten(),
@@ -1009,10 +1020,15 @@ impl BackendState {
                                 .flatten(),
                             )
                             .chain(
-                                if self.settings.feature_snippets & !self.settings.snippets_first {
-                                    Some(self.snippets(chars_prefix, "", false, doc, &params))
-                                } else {
-                                    None
+                                match (
+                                    self.settings.feature_snippets,
+                                    self.settings.snippets_first,
+                                    prefix,
+                                ) {
+                                    (true, false, Some(prefix)) => {
+                                        Some(self.snippets(prefix, "", false, doc, &params))
+                                    }
+                                    _ => None,
                                 }
                                 .into_iter()
                                 .flatten(),
@@ -1071,7 +1087,7 @@ impl BackendState {
                     let results: Vec<CompletionItem> = base_completion();
 
                     tracing::debug!(
-                        "completion request took {:.2}ms with {} result items",
+                        "completion request by prefix: {prefix:?} chars prefix: {chars_prefix:?} took {:.2}ms with {} result items",
                         now.elapsed().as_millis(),
                         results.len(),
                     );
