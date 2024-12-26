@@ -173,8 +173,9 @@ fn chunks_by_words() -> anyhow::Result<()> {
 
     let mut reader = RopeReader::new(&rope);
 
+    let mut buf = vec![0; 1000 * 5];
+
     loop {
-        let mut buf = vec![0; 10000];
         let n = reader.read(&mut buf)?;
 
         if n == 0 {

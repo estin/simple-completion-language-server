@@ -1134,7 +1134,7 @@ impl BackendState {
                     let results: Vec<CompletionItem> = base_completion();
 
                     tracing::debug!(
-                        "completion request by prefix: {prefix:?} chars prefix: {chars_prefix:?} took {:.2}ms (new) with {} result items",
+                        "completion request by prefix: {prefix:?} chars prefix: {chars_prefix:?} took {:.2}ms with {} result items",
                         now.elapsed().as_millis(),
                         results.len(),
                     );
