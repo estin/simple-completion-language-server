@@ -1,4 +1,4 @@
-use simple_completion_language_server::{server, snippets, RopeReader};
+use simple_completion_language_server::{ac_searcher, search, server, snippets, RopeReader};
 use std::collections::HashMap;
 use std::io::Read;
 
@@ -175,6 +175,8 @@ fn chunks_by_words() -> anyhow::Result<()> {
 
     let mut buf = vec![0; 1000 * 5];
 
+    let mut whole_text = String::new();
+
     loop {
         let n = reader.read(&mut buf)?;
 
@@ -183,9 +185,42 @@ fn chunks_by_words() -> anyhow::Result<()> {
         }
 
         let text = std::str::from_utf8(&buf[..n])?;
-        let last_word = text.trim().split(" ").last().unwrap();
+
+        whole_text.push_str(&text);
+
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+
+        let last_word = text.split(" ").last().unwrap();
+
         assert_eq!(last_word, "word");
     }
+    let words = whole_text.trim().split(" ");
+    assert_eq!(words.clone().count(), 1000);
+
+    Ok(())
+}
+
+#[test_log::test]
+fn words_search() -> anyhow::Result<()> {
+    let text = r#"Word 求 btask_timeout HANDLERS["loggers"]"#;
+    let doc = ropey::Rope::from_str(text);
+    let mut words = std::collections::HashSet::new();
+
+    let prefix = "BTA";
+    search(prefix, &doc, &ac_searcher(prefix)?, 10, &mut words)?;
+    assert_eq!(
+        words.iter().next().map(|v| v.as_str()),
+        Some("btask_timeout")
+    );
+
+    words.clear();
+
+    let prefix = "logge";
+    search(prefix, &doc, &ac_searcher(prefix)?, 10, &mut words)?;
+    assert_eq!(words.iter().next().map(|v| v.as_str()), Some("loggers"));
 
     Ok(())
 }
@@ -254,6 +289,30 @@ async fn completion() -> anyhow::Result<()> {
     };
 
     assert_eq!(items.len(), 0);
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn completion_by_quoted_word() -> anyhow::Result<()> {
+    let mut context = TestContext::new(Vec::new(), HashMap::new(), String::new()).await?;
+    context.initialize().await?;
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"function(\"hello\")\nhe","uri":"file:///tmp/main.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":1},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items.into_iter().map(|i| i.label).collect::<Vec<_>>(),
+        vec!["hello"]
+    );
 
     Ok(())
 }

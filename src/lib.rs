@@ -173,9 +173,87 @@ impl std::io::Read for RopeReader<'_> {
                 Write::write_all(&mut buf, data.as_bytes())?;
                 Ok(tail_len + data.len())
             }
-            _ => Ok(0),
+            _ => {
+                let tail_len = self.tail.len();
+
+                if tail_len == 0 {
+                    return Ok(0);
+                }
+
+                // write previous tail
+                let tail = self.tail.drain(..);
+                Write::write_all(&mut buf, tail.as_slice())?;
+                Ok(tail_len)
+            }
         }
     }
+}
+
+pub fn ac_searcher(prefix: &str) -> Result<AhoCorasick> {
+    AhoCorasick::builder()
+        .ascii_case_insensitive(true)
+        .build([&prefix])
+        .map_err(|e| anyhow::anyhow!("error {e}"))
+}
+
+pub fn search(
+    prefix: &str,
+    text: &Rope,
+    ac: &AhoCorasick,
+    max_completion_items: usize,
+    result: &mut HashSet<String>,
+) -> Result<()> {
+    let searcher = ac.try_stream_find_iter(RopeReader::new(&text))?;
+
+    for mat in searcher {
+        let mat = mat?;
+
+        let Ok(start_char_idx) = text.try_byte_to_char(mat.start()) else {
+            continue;
+        };
+        let Ok(mat_end) = text.try_byte_to_char(mat.end()) else {
+            continue;
+        };
+
+        // check is word start
+        if mat.start() > 0 {
+            let Ok(s) = text.try_byte_to_char(mat.start() - 1) else {
+                continue;
+            };
+            let Some(ch) = text.get_char(s) else {
+                continue;
+            };
+            if char_is_word(ch) {
+                continue;
+            }
+        }
+
+        // search word end
+        let word_end = text
+            .chars()
+            .skip(mat_end)
+            .take_while(|ch| char_is_word(*ch))
+            .count();
+
+        let Ok(word_end) = text.try_char_to_byte(mat_end + word_end) else {
+            continue;
+        };
+        let Ok(end_char_idx) = text.try_byte_to_char(word_end) else {
+            continue;
+        };
+
+        let item = text.slice(start_char_idx..end_char_idx);
+        if let Some(item) = item.as_str() {
+            if item != prefix && starts_with(item, prefix) {
+                result.insert(item.to_string());
+                if result.len() >= max_completion_items {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -395,83 +473,31 @@ impl BackendState {
         Ok((prefix, chars_prefix, doc))
     }
 
-    fn search(
-        &self,
-        ac: &AhoCorasick,
-        prefix: &str,
-        doc: &Document,
-        result: &mut HashSet<String>,
-    ) -> Result<()> {
-        let len_bytes = doc.text.len_bytes();
-
-        let searcher = ac.try_stream_find_iter(RopeReader::new(&doc.text))?;
-
-        for mat in searcher {
-            let mat = mat?;
-
-            // calc word start
-            let Some(mut iter) = doc.text.get_chars_at(mat.start()) else {
-                continue;
-            };
-            iter.reverse();
-            let offset = iter.take_while(|ch| char_is_word(*ch)).count();
-            let word_start = mat.start().saturating_sub(offset);
-
-            if word_start + prefix.len() >= len_bytes {
-                continue;
-            }
-
-            // calc word end
-            let mat_end = doc.text.byte_to_char(mat.end());
-            let word_end = doc
-                .text
-                .chars()
-                .skip(mat_end)
-                .take_while(|ch| char_is_word(*ch))
-                .count();
-
-            let word_end = doc.text.char_to_byte(mat_end + word_end);
-
-            if word_end > len_bytes {
-                continue;
-            }
-            let Ok(start_char_idx) = doc.text.try_byte_to_char(word_start) else {
-                continue;
-            };
-            let Ok(end_char_idx) = doc.text.try_byte_to_char(word_end) else {
-                continue;
-            };
-            let item = doc.text.slice(start_char_idx..end_char_idx);
-            if let Some(item) = item.as_str() {
-                if item != prefix && starts_with(item, prefix) {
-                    result.insert(item.to_string());
-                    if result.len() >= self.settings.max_completion_items {
-                        return Ok(());
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
-
     fn completion(&self, prefix: &str, current_doc: &Document) -> Result<HashSet<String>> {
         // prepare search pattern
-        let ac = AhoCorasick::builder()
-            .ascii_case_insensitive(true)
-            .build([&prefix])
-            .map_err(|e| anyhow::anyhow!("error {e}"))?;
-
+        let ac = ac_searcher(prefix)?;
         let mut result = HashSet::with_capacity(self.settings.max_completion_items);
 
         // search in current doc at first
-        self.search(&ac, prefix, current_doc, &mut result)?;
+        search(
+            prefix,
+            &current_doc.text,
+            &ac,
+            self.settings.max_completion_items,
+            &mut result,
+        )?;
         if result.len() >= self.settings.max_completion_items {
             return Ok(result);
         }
 
         for doc in self.docs.values().filter(|doc| doc.uri != current_doc.uri) {
-            self.search(&ac, prefix, doc, &mut result)?;
+            search(
+                prefix,
+                &doc.text,
+                &ac,
+                self.settings.max_completion_items,
+                &mut result,
+            )?;
             if result.len() >= self.settings.max_completion_items {
                 return Ok(result);
             }
