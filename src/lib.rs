@@ -203,7 +203,7 @@ pub fn search(
     max_completion_items: usize,
     result: &mut HashSet<String>,
 ) -> Result<()> {
-    let searcher = ac.try_stream_find_iter(RopeReader::new(&text))?;
+    let searcher = ac.try_stream_find_iter(RopeReader::new(text))?;
 
     for mat in searcher {
         let mat = mat?;

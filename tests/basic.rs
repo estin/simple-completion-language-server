@@ -186,7 +186,7 @@ fn chunks_by_words() -> anyhow::Result<()> {
 
         let text = std::str::from_utf8(&buf[..n])?;
 
-        whole_text.push_str(&text);
+        whole_text.push_str(text);
 
         let text = text.trim();
         if text.is_empty() {
