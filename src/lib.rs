@@ -62,7 +62,7 @@ pub struct PartialBackendSettings {
 impl Default for BackendSettings {
     fn default() -> Self {
         BackendSettings {
-            max_completion_items: 20,
+            max_completion_items: 100,
             max_chars_prefix_len: 64,
             snippets_first: false,
             snippets_inline_by_word_tail: false,

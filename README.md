@@ -35,7 +35,7 @@ For Helix on `~/.config/helix/languages.toml`
 command = "simple-completion-language-server"
 
 [language-server.scls.config]
-max_completion_items = 20            # set max completion results len for each group: words, snippets, unicode-input
+max_completion_items = 100           # set max completion results len for each group: words, snippets, unicode-input
 snippets_first = true                # completions will return before snippets by default
 snippets_inline_by_word_tail = false # suggest snippets by WORD tail, for example text `xsq|` become `x^2|` when snippet `sq` has body `^2`
 feature_words = true                 # enable completion by word
