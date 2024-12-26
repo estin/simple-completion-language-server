@@ -1,5 +1,6 @@
-use simple_completion_language_server::{server, snippets};
+use simple_completion_language_server::{server, snippets, RopeReader};
 use std::collections::HashMap;
+use std::io::Read;
 
 use std::pin::Pin;
 use std::str::FromStr;
@@ -164,6 +165,28 @@ impl TestContext {
 
         Ok(())
     }
+}
+
+#[test_log::test]
+fn chunks_by_words() -> anyhow::Result<()> {
+    let rope = ropey::Rope::from_iter((0..1000).map(|_| "word ".to_string()));
+
+    let mut reader = RopeReader::new(&rope);
+
+    loop {
+        let mut buf = vec![0; 10000];
+        let n = reader.read(&mut buf)?;
+
+        if n == 0 {
+            break;
+        }
+
+        let text = std::str::from_utf8(&buf[..n])?;
+        let last_word = text.trim().split(" ").last().unwrap();
+        assert_eq!(last_word, "word");
+    }
+
+    Ok(())
 }
 
 #[test_log::test(tokio::test)]

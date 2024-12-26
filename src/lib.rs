@@ -130,12 +130,14 @@ pub fn starts_with(source: &str, s: &str) -> bool {
 }
 
 pub struct RopeReader<'a> {
+    tail: Vec<u8>,
     chunks: ropey::iter::Chunks<'a>,
 }
 
 impl<'a> RopeReader<'a> {
     pub fn new(rope: &'a ropey::Rope) -> Self {
         RopeReader {
+            tail: Vec::new(),
             chunks: rope.chunks(),
         }
     }
@@ -144,7 +146,33 @@ impl<'a> RopeReader<'a> {
 impl std::io::Read for RopeReader<'_> {
     fn read(&mut self, mut buf: &mut [u8]) -> std::io::Result<usize> {
         match self.chunks.next() {
-            Some(chunk) => buf.write(chunk.as_bytes()),
+            Some(chunk) => {
+                let tail_len = self.tail.len();
+
+                // write previous tail
+                if tail_len > 0 {
+                    let tail = self.tail.drain(..);
+                    Write::write_all(&mut buf, tail.as_slice())?;
+                }
+
+                // find last ending word
+                let data = if let Some((byte_pos, _)) = chunk
+                    .char_indices()
+                    .rev()
+                    .find(|(_, ch)| !char_is_word(*ch))
+                {
+                    if byte_pos != 0 {
+                        Write::write_all(&mut self.tail, chunk[byte_pos..].as_bytes())?;
+                        &chunk[0..byte_pos]
+                    } else {
+                        chunk
+                    }
+                } else {
+                    chunk
+                };
+                Write::write_all(&mut buf, data.as_bytes())?;
+                Ok(tail_len + data.len())
+            }
             _ => Ok(0),
         }
     }
@@ -372,14 +400,13 @@ impl BackendState {
         ac: &AhoCorasick,
         prefix: &str,
         doc: &Document,
-        to_take: usize,
-    ) -> Result<HashSet<String>> {
-        let mut result: HashSet<String> = HashSet::new();
+        result: &mut HashSet<String>,
+    ) -> Result<()> {
         let len_bytes = doc.text.len_bytes();
 
         let searcher = ac.try_stream_find_iter(RopeReader::new(&doc.text))?;
 
-        for mat in searcher.take(to_take) {
+        for mat in searcher {
             let mat = mat?;
 
             // calc word start
@@ -419,13 +446,13 @@ impl BackendState {
                 if item != prefix && starts_with(item, prefix) {
                     result.insert(item.to_string());
                     if result.len() >= self.settings.max_completion_items {
-                        return Ok(result);
+                        return Ok(());
                     }
                 }
             }
         }
 
-        Ok(result)
+        Ok(())
     }
 
     fn completion(&self, prefix: &str, current_doc: &Document) -> Result<HashSet<String>> {
@@ -435,20 +462,16 @@ impl BackendState {
             .build([&prefix])
             .map_err(|e| anyhow::anyhow!("error {e}"))?;
 
+        let mut result = HashSet::with_capacity(self.settings.max_completion_items);
+
         // search in current doc at first
-        let mut result =
-            self.search(&ac, prefix, current_doc, self.settings.max_completion_items)?;
+        self.search(&ac, prefix, current_doc, &mut result)?;
         if result.len() >= self.settings.max_completion_items {
             return Ok(result);
         }
 
         for doc in self.docs.values().filter(|doc| doc.uri != current_doc.uri) {
-            result.extend(self.search(
-                &ac,
-                prefix,
-                doc,
-                self.settings.max_completion_items - result.len(),
-            )?);
+            self.search(&ac, prefix, doc, &mut result)?;
             if result.len() >= self.settings.max_completion_items {
                 return Ok(result);
             }
@@ -1111,7 +1134,7 @@ impl BackendState {
                     let results: Vec<CompletionItem> = base_completion();
 
                     tracing::debug!(
-                        "completion request by prefix: {prefix:?} chars prefix: {chars_prefix:?} took {:.2}ms with {} result items",
+                        "completion request by prefix: {prefix:?} chars prefix: {chars_prefix:?} took {:.2}ms (new) with {} result items",
                         now.elapsed().as_millis(),
                         results.len(),
                     );
