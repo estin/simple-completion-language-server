@@ -992,13 +992,30 @@ impl BackendState {
                     let base_completion = || {
                         Vec::new()
                             .into_iter()
+                            // snippets first
                             .chain(
                                 match (
                                     self.settings.feature_snippets,
+                                    self.settings.snippets_inline_by_word_tail,
                                     self.settings.snippets_first,
                                     prefix,
                                 ) {
-                                    (true, true, Some(prefix)) if !prefix.is_empty() => {
+                                    (true, true, true, _) if !chars_prefix.is_empty() => {
+                                        Some(self.snippets_by_word_tail(chars_prefix, doc, &params))
+                                    }
+                                    _ => None,
+                                }
+                                .into_iter()
+                                .flatten(),
+                            )
+                            .chain(
+                                match (
+                                    self.settings.feature_snippets,
+                                    self.settings.snippets_inline_by_word_tail,
+                                    self.settings.snippets_first,
+                                    prefix,
+                                ) {
+                                    (true, false, true, Some(prefix)) if !prefix.is_empty() => {
                                         Some(self.snippets(prefix, "", false, doc, &params))
                                     }
                                     _ => None,
@@ -1006,6 +1023,7 @@ impl BackendState {
                                 .into_iter()
                                 .flatten(),
                             )
+                            // words
                             .chain(
                                 if let Some(prefix) = prefix {
                                     if self.settings.feature_words {
@@ -1019,14 +1037,16 @@ impl BackendState {
                                 .into_iter()
                                 .flatten(),
                             )
+                            // snippets last
                             .chain(
                                 match (
                                     self.settings.feature_snippets,
+                                    self.settings.snippets_inline_by_word_tail,
                                     self.settings.snippets_first,
                                     prefix,
                                 ) {
-                                    (true, false, Some(prefix)) if !prefix.is_empty() => {
-                                        Some(self.snippets(prefix, "", false, doc, &params))
+                                    (true, true, false, _) if !chars_prefix.is_empty() => {
+                                        Some(self.snippets_by_word_tail(chars_prefix, doc, &params))
                                     }
                                     _ => None,
                                 }
@@ -1034,12 +1054,16 @@ impl BackendState {
                                 .flatten(),
                             )
                             .chain(
-                                if self.settings.feature_snippets
-                                    & self.settings.snippets_inline_by_word_tail
-                                {
-                                    Some(self.snippets_by_word_tail(chars_prefix, doc, &params))
-                                } else {
-                                    None
+                                match (
+                                    self.settings.feature_snippets,
+                                    self.settings.snippets_inline_by_word_tail,
+                                    self.settings.snippets_first,
+                                    prefix,
+                                ) {
+                                    (true, false, false, Some(prefix)) if !prefix.is_empty() => {
+                                        Some(self.snippets(prefix, "", false, doc, &params))
+                                    }
+                                    _ => None,
                                 }
                                 .into_iter()
                                 .flatten(),
