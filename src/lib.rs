@@ -998,7 +998,7 @@ impl BackendState {
                                     self.settings.snippets_first,
                                     prefix,
                                 ) {
-                                    (true, true, Some(prefix)) => {
+                                    (true, true, Some(prefix)) if !prefix.is_empty() => {
                                         Some(self.snippets(prefix, "", false, doc, &params))
                                     }
                                     _ => None,
@@ -1025,7 +1025,7 @@ impl BackendState {
                                     self.settings.snippets_first,
                                     prefix,
                                 ) {
-                                    (true, false, Some(prefix)) => {
+                                    (true, false, Some(prefix)) if !prefix.is_empty() => {
                                         Some(self.snippets(prefix, "", false, doc, &params))
                                     }
                                     _ => None,
