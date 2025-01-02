@@ -61,7 +61,7 @@ async fn serve(start_options: &StartOptions) {
 fn help() {
     println!(
         "usage:
-simple-completion-language-server feth-external-snippets
+simple-completion-language-server fetch-external-snippets
     Fetch external snippets (git clone or git pull).
 simple-completion-language-server validate-snippets
     Read all snippets to ensure correctness.
