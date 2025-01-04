@@ -391,7 +391,7 @@ async fn snippets_inline_by_word_tail() -> anyhow::Result<()> {
                     "feature_citations": false,
                     "feature_words": false,
                     "feature_unicode_input": false,
-                    "feature_path": false,
+                    "feature_paths": false,
                 }
             }
         }
@@ -436,6 +436,25 @@ async fn unicode_input() -> anyhow::Result<()> {
     )
     .await?;
     context.initialize().await?;
+
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "snippets_inline_by_word_tail": false,
+                    "feature_snippets": false,
+                    "feature_citations": false,
+                    "feature_words": false,
+                    "feature_unicode_input": true,
+                    "feature_paths": false,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"α+bet","uri":"file:///tmp/main.py","version":0}}}"#,
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":5,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
@@ -467,6 +486,25 @@ async fn paths() -> anyhow::Result<()> {
 
     let mut context = TestContext::new(Vec::new(), HashMap::new(), "/tmp".to_string()).await?;
     context.initialize().await?;
+
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "snippets_inline_by_word_tail": false,
+                    "feature_snippets": false,
+                    "feature_citations": false,
+                    "feature_words": false,
+                    "feature_unicode_input": false,
+                    "feature_paths": true,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"/tmp/scls-test/","uri":"file:///tmp/main.py","version":0}}}"#,
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":15,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
@@ -599,7 +637,7 @@ bibliography: "/tmp/scls-test-citation/test.bib" # could also be surrounded by b
                     "feature_words": false,
                     "feature_snippets": false,
                     "feature_unicode_input": false,
-                    "feature_path": false,
+                    "feature_paths": false,
                 }
             }
         }

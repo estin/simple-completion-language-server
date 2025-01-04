@@ -71,9 +71,9 @@ impl Default for BackendSettings {
                 .to_string(),
             feature_words: true,
             feature_snippets: true,
-            feature_unicode_input: true,
-            feature_paths: true,
-            feature_citations: true,
+            feature_unicode_input: false,
+            feature_paths: false,
+            feature_citations: false,
         }
     }
 }
