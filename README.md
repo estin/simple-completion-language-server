@@ -89,6 +89,7 @@ Snippets format
 prefix = "ld"
 scope = [ "python" ]
 body = 'log.debug("$1")'
+description = "log at debug level"
 ```
 
 ### Use external snippets collections from git repos
