@@ -78,7 +78,7 @@ Read snippets from dir `~/.config/helix/snippets` or specify snippets path via `
 
 Currently, it supports our own `toml` format and vscode `json` (a basic effort).
 
-Filename used as snippet scope (language), filename `snippets.(toml|json)` will not attach scope to snippets.
+Filename used as snippet scope ([language id][1]), filename `snippets.(toml|json)` will not attach scope to snippets.
 
 For example, snippets with the filename `python.toml` or `python.json` would have a `python` scope.
 
@@ -87,7 +87,7 @@ Snippets format
 ```toml
 [[snippets]]
 prefix = "ld"
-scope = [ "python" ]
+scope = [ "python" ]  # language id https://code.visualstudio.com/docs/languages/identifiers#_known-language-identifiers
 body = 'log.debug("$1")'
 description = "log at debug level"
 ```
@@ -102,7 +102,7 @@ name = "friendly-snippets"  # optional name shown on snippet description
 git = "https://github.com/rafamadriz/friendly-snippets.git" # git repo with snippets collections
 
 [[sources.paths]] # list of paths to load on current source
-scope = ["python"]  # optional scopes for current snippets
+scope = ["python"]  # optional scopes (language id) for current snippets
 path = "snippets/python/python.json"  # where snippet file or dir located in repo
 ```
 
@@ -174,3 +174,5 @@ For more info, please check https://github.com/estin/simple-completion-language-
 
 - [rafamadriz/friendly-snippets](https://github.com/rafamadriz/friendly-snippets)
 - ...(please add another useful links here)
+
+[1]: <https://code.visualstudio.com/docs/languages/identifiers#_known-language-identifiers> "Known language identifiers"
