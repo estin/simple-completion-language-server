@@ -110,7 +110,7 @@ impl BackendSettings {
 
 #[inline]
 pub fn char_is_word(ch: char) -> bool {
-    ch.is_alphanumeric() || ch == '_'
+    ch.is_alphanumeric() || ch == '_' || ch == '-'
 }
 
 #[inline]
@@ -607,7 +607,7 @@ impl BackendState {
         };
 
         let l = chars_prefix.len();
-        for count in start..l {
+        for count in start..=l {
             let Some(start) = chars_prefix.char_indices().map(|(i, _)| i).nth(l - count) else {
                 continue;
             };
