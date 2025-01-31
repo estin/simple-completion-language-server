@@ -575,6 +575,7 @@ async fn paths() -> anyhow::Result<()> {
 }
 
 #[test_log::test(tokio::test)]
+#[cfg(feature = "citation")]
 async fn citations() -> anyhow::Result<()> {
     std::fs::create_dir_all("/tmp/scls-test-citation")?;
 
