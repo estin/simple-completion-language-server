@@ -11,7 +11,7 @@ use simple_completion_language_server::{
 };
 
 async fn serve(start_options: &StartOptions) {
-    let _quard = if let Ok(log_file) = &std::env::var("LOG_FILE") {
+    let _guard = if let Ok(log_file) = &std::env::var("LOG_FILE") {
         let log_file = std::path::Path::new(log_file);
         let file_appender = tracing_appender::rolling::never(
             log_file
@@ -25,7 +25,7 @@ async fn serve(start_options: &StartOptions) {
         tracing_subscriber::registry()
             .with(tracing_subscriber::EnvFilter::new(
                 std::env::var("RUST_LOG")
-                    .unwrap_or_else(|_| "info,simple-comletion-language-server=info".into()),
+                    .unwrap_or_else(|_| "info,simple-completion-language-server=info".into()),
             ))
             .with(tracing_subscriber::fmt::layer().with_writer(non_blocking))
             .init();
@@ -168,7 +168,7 @@ async fn main() {
             tracing_subscriber::registry()
                 .with(tracing_subscriber::EnvFilter::new(
                     std::env::var("RUST_LOG")
-                        .unwrap_or_else(|_| "info,simple-comletion-language-server=info".into()),
+                        .unwrap_or_else(|_| "info,simple-completion-language-server=info".into()),
                 ))
                 .with(tracing_subscriber::fmt::layer())
                 .init();
