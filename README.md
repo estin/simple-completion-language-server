@@ -76,6 +76,8 @@ language-servers = [ "scls" ]
 
 Read snippets from dir `~/.config/helix/snippets` or specify snippets path via `SNIPPETS_PATH` env.
 
+Default lookup directory can be overriden via `SCLS_CONFIG_SUBDIRECTORY` as well (e.g. when SCLS_CONFIG_SUBDIRECTORY = `vim`, SCLS will perform it's lookups in `~/.config/vim` instead)
+
 Currently, it supports our own `toml` format and vscode `json` (a basic effort).
 
 Filename used as snippet scope ([language id][1]), filename `snippets.(toml|json)` will not attach scope to snippets.
