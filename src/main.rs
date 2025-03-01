@@ -132,7 +132,9 @@ async fn main() {
 
     let strategy = choose_base_strategy().expect("Unable to find the config directory!");
     let mut config_dir = strategy.config_dir();
-    config_dir.push("helix");
+    let config_subdirectory_name =
+        std::env::var("SCLS_CONFIG_SUBDIRECTORY").unwrap_or_else(|_| "helix".to_owned());
+    config_dir.push(config_subdirectory_name);
 
     let start_options = StartOptions {
         home_dir: etcetera::home_dir()
