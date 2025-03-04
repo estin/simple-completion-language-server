@@ -704,9 +704,9 @@ dependencies = [
 
 [[package]]
 name = "regex-cursor"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae4327b5fde3ae6fda0152128d3d59b95a5aad7be91c405869300091720f7169"
+checksum = "0497c781d2f982ae8284d2932aee6a877e58a4541daa5e8fadc18cc75c23a61d"
 dependencies = [
  "log",
  "memchr",
