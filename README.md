@@ -9,7 +9,9 @@ https://github.com/estin/simple-completion-language-server/assets/520814/10566ad
 
 Based on [comment](https://github.com/helix-editor/helix/pull/3328#issuecomment-1559031060)
 
-### Install (from source only)
+### Install
+
+#### From source
 
 From GitHub:
 
@@ -23,6 +25,35 @@ From local repository:
 $ git clone https://github.com/estin/simple-completion-language-server.git
 $ cd simple-completion-language-server
 $ cargo install --path .
+```
+
+#### Nix
+
+You can install `simple-completion-language-server` using the [nix package manager](https://nixos.org/) from [nixpkgs](https://search.nixos.org/packages?channel=unstable&show=simple-completion-language-server&from=0&size=50&sort=relevance&type=packages&query=simple-comple).
+
+> [!NOTE]  
+> At the moment the package is only available on the [unstable](https://nixos.org/manual/nixpkgs/unstable/#overview-of-nixpkgs) channel of nixpkgs.
+
+```console
+# Add it to a temporary shell environment
+nix shell nixpkgs#simple-completion-language-server
+# Add it to your current profile
+nix profile install nixpkgs#simple-completion-language-server
+```
+
+> [!NOTE]
+> The above instructions assume you have enabled the *experimental features* `nix-command` `flakes`. If you are unsure about what this means or how to check read [here](https://nixos.wiki/wiki/Flakes).
+
+If you are on [NixOS](https://nixos.org/) or are using [home-manager](https://nix-community.github.io/home-manager/) you can do one of the following:
+
+```nix
+# NixOS configuration.nix
+environment.systemPackages = [pkgs.simple-completion-language-server];
+
+# or home-manager config
+home.packages = [pkgs.simple-completion-language-server];
+# This will let `hx` know about the location of the binary without putting it in your $PATH
+programs.helix.extraPackages = [pkgs.simple-completion-language-server];
 ```
 
 ### Configure
