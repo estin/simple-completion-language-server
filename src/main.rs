@@ -1,5 +1,5 @@
 use etcetera::base_strategy::{choose_base_strategy, BaseStrategy};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use xshell::{cmd, Shell};
 
@@ -45,7 +45,7 @@ async fn serve(start_options: &StartOptions) {
     let unicode_input = load_unicode_input_from_path(&start_options.unicode_input_path)
         .unwrap_or_else(|e| {
             tracing::error!("On read 'unicode input' config: {e}");
-            HashMap::new()
+            BTreeMap::new()
         });
 
     server::start(

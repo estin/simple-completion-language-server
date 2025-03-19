@@ -3,7 +3,7 @@ use anyhow::Result;
 use ropey::Rope;
 use serde::Deserialize;
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::prelude::*;
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::lsp_types::*;
@@ -286,7 +286,7 @@ pub struct BackendState {
     settings: BackendSettings,
     docs: HashMap<Url, Document>,
     snippets: Vec<Snippet>,
-    unicode_input: HashMap<String, String>,
+    unicode_input: BTreeMap<String, String>,
     max_unicude_input_prefix_len: usize,
     min_unicude_input_prefix_len: usize,
     max_snippet_input_prefix_len: usize,
@@ -301,7 +301,7 @@ impl BackendState {
     pub async fn new(
         home_dir: String,
         snippets: Vec<Snippet>,
-        unicode_input: HashMap<String, String>,
+        unicode_input: BTreeMap<String, String>,
     ) -> (mpsc::UnboundedSender<BackendRequest>, Self) {
         let (request_tx, request_rx) = mpsc::unbounded_channel::<BackendRequest>();
 
@@ -562,6 +562,7 @@ impl BackendState {
                 };
                 CompletionItem {
                     label: s.prefix.to_owned(),
+                    sort_text: Some(s.prefix.to_string()),
                     filter_text: Some(if filter_text_prefix.is_empty() {
                         s.prefix.to_string()
                     } else {
@@ -668,6 +669,7 @@ impl BackendState {
                     };
                     Some(CompletionItem {
                         label: body.to_string(),
+                        sort_text: Some(prefix.to_string()),
                         filter_text: Some(format!("{word_prefix}{prefix}")),
                         kind: Some(CompletionItemKind::TEXT),
                         text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
@@ -789,6 +791,7 @@ impl BackendState {
                 };
                 Some(CompletionItem {
                     label: full_path.to_string(),
+                    sort_text: Some(full_path.to_string()),
                     filter_text: Some(format!("{word_prefix}{full_path}")),
                     kind: Some(if path.is_dir() {
                         CompletionItemKind::FOLDER
@@ -941,6 +944,7 @@ impl BackendState {
                         };
                         Some(CompletionItem {
                             label: format!("@{}", b.key),
+                            sort_text: Some(word_prefix.to_string()),
                             filter_text: Some(word_prefix.to_string()),
                             kind: Some(CompletionItemKind::REFERENCE),
                             text_edit: Some(CompletionTextEdit::InsertAndReplace(

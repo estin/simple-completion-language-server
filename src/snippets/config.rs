@@ -3,7 +3,7 @@ use crate::snippets::vscode::VSSnippetsConfig;
 use crate::StartOptions;
 use anyhow::Result;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 #[derive(Deserialize)]
 pub struct SnippetsConfig {
@@ -21,7 +21,7 @@ pub struct Snippet {
 #[derive(Deserialize)]
 pub struct UnicodeInputConfig {
     #[serde(flatten)]
-    pub inner: HashMap<String, String>,
+    pub inner: BTreeMap<String, String>,
 }
 
 pub fn load_snippets(start_options: &StartOptions) -> Result<Vec<Snippet>> {
@@ -69,6 +69,8 @@ pub fn load_snippets(start_options: &StartOptions) -> Result<Vec<Snippet>> {
             }
         }
     }
+
+    snippets.sort_unstable_by(|a, b| a.prefix.cmp(&b.prefix));
 
     Ok(snippets)
 }
@@ -169,7 +171,7 @@ pub fn load_snippets_from_path(
     Ok(snippets)
 }
 
-pub fn load_unicode_input_from_file(path: &std::path::PathBuf) -> Result<HashMap<String, String>> {
+pub fn load_unicode_input_from_file(path: &std::path::PathBuf) -> Result<BTreeMap<String, String>> {
     tracing::info!("Try load 'unicode input' config from: {path:?}");
 
     let content = std::fs::read_to_string(path)?;
@@ -188,12 +190,12 @@ pub fn load_unicode_input_from_file(path: &std::path::PathBuf) -> Result<HashMap
 
 pub fn load_unicode_input_from_path(
     snippets_path: &std::path::PathBuf,
-) -> Result<HashMap<String, String>> {
+) -> Result<BTreeMap<String, String>> {
     if snippets_path.is_file() {
         return load_unicode_input_from_file(snippets_path);
     }
 
-    let mut result = HashMap::new();
+    let mut result = BTreeMap::new();
     match std::fs::read_dir(snippets_path) {
         Ok(entries) => {
             for entry in entries {

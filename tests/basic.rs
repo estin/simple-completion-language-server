@@ -1,5 +1,5 @@
 use simple_completion_language_server::{ac_searcher, search, server, snippets, RopeReader};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::io::Read;
 
 use std::pin::Pin;
@@ -75,7 +75,7 @@ struct TestContext {
 impl TestContext {
     pub async fn new(
         snippets: Vec<snippets::Snippet>,
-        unicode_input: HashMap<String, String>,
+        unicode_input: BTreeMap<String, String>,
         home_dir: String,
     ) -> anyhow::Result<Self> {
         let (request_tx, rx) = mpsc::unbounded_channel::<String>();
@@ -227,7 +227,7 @@ fn words_search() -> anyhow::Result<()> {
 
 #[test_log::test(tokio::test)]
 async fn initialize() -> anyhow::Result<()> {
-    let mut context = TestContext::new(Vec::new(), HashMap::new(), String::new()).await?;
+    let mut context = TestContext::new(Vec::new(), BTreeMap::new(), String::new()).await?;
 
     let request = jsonrpc::Request::build("initialize")
         .id(1)
@@ -258,7 +258,7 @@ async fn initialize() -> anyhow::Result<()> {
 
 #[test_log::test(tokio::test)]
 async fn completion() -> anyhow::Result<()> {
-    let mut context = TestContext::new(Vec::new(), HashMap::new(), String::new()).await?;
+    let mut context = TestContext::new(Vec::new(), BTreeMap::new(), String::new()).await?;
     context.initialize().await?;
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"hello\nhe","uri":"file:///tmp/main.py","version":0}}}"#,
@@ -295,7 +295,7 @@ async fn completion() -> anyhow::Result<()> {
 
 #[test_log::test(tokio::test)]
 async fn completion_by_quoted_word() -> anyhow::Result<()> {
-    let mut context = TestContext::new(Vec::new(), HashMap::new(), String::new()).await?;
+    let mut context = TestContext::new(Vec::new(), BTreeMap::new(), String::new()).await?;
     context.initialize().await?;
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"function(\"hello\")\nhe","uri":"file:///tmp/main.py","version":0}}}"#,
@@ -334,7 +334,7 @@ async fn snippets() -> anyhow::Result<()> {
                 description: None,
             },
         ],
-        HashMap::new(),
+        BTreeMap::new(),
         String::new(),
     )
     .await?;
@@ -374,7 +374,7 @@ async fn snippets_inline_by_word_tail() -> anyhow::Result<()> {
             body: "^2".to_string(),
             description: None,
         }],
-        HashMap::new(),
+        BTreeMap::new(),
         String::new(),
     )
     .await?;
@@ -428,7 +428,7 @@ async fn snippets_inline_by_word_tail() -> anyhow::Result<()> {
 async fn unicode_input() -> anyhow::Result<()> {
     let mut context = TestContext::new(
         Vec::new(),
-        HashMap::from_iter([
+        BTreeMap::from_iter([
             ("alpha".to_string(), "α".to_string()),
             ("betta".to_string(), "β".to_string()),
         ]),
@@ -484,7 +484,7 @@ async fn unicode_input() -> anyhow::Result<()> {
 async fn paths() -> anyhow::Result<()> {
     std::fs::create_dir_all("/tmp/scls-test/sub-folder")?;
 
-    let mut context = TestContext::new(Vec::new(), HashMap::new(), "/tmp".to_string()).await?;
+    let mut context = TestContext::new(Vec::new(), BTreeMap::new(), "/tmp".to_string()).await?;
     context.initialize().await?;
 
     let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
@@ -625,7 +625,7 @@ bibliography: "/tmp/scls-test-citation/test.bib" # could also be surrounded by b
 
     std::fs::write("/tmp/scls-test-citation/test.bib", bib)?;
 
-    let mut context = TestContext::new(Vec::new(), HashMap::new(), String::new()).await?;
+    let mut context = TestContext::new(Vec::new(), BTreeMap::new(), String::new()).await?;
     context.initialize().await?;
 
     let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
