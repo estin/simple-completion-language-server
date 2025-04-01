@@ -664,9 +664,6 @@ impl BackendState {
                 .unicode_input
                 .iter()
                 .filter_map(|(prefix, body)| {
-                    tracing::info!(
-                        "Chars_prefix: {chars_prefix} index:{index} part: {part} prefix:  {prefix}"
-                    );
                     if !starts_with(prefix, part) {
                         return None;
                     }
