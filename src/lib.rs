@@ -287,8 +287,8 @@ pub struct BackendState {
     docs: HashMap<Url, Document>,
     snippets: Vec<Snippet>,
     unicode_input: BTreeMap<String, String>,
-    max_unicude_input_prefix_len: usize,
-    min_unicude_input_prefix_len: usize,
+    max_unicode_input_prefix_len: usize,
+    min_unicode_input_prefix_len: usize,
     max_snippet_input_prefix_len: usize,
     min_snippet_input_prefix_len: usize,
     rx: mpsc::UnboundedReceiver<BackendRequest>,
@@ -320,12 +320,12 @@ impl BackendState {
 
                 settings,
                 docs: HashMap::new(),
-                max_unicude_input_prefix_len: unicode_input
+                max_unicode_input_prefix_len: unicode_input
                     .keys()
                     .map(|s| s.len())
                     .max()
                     .unwrap_or_default(),
-                min_unicude_input_prefix_len: unicode_input
+                min_unicode_input_prefix_len: unicode_input
                     .keys()
                     .map(|s| s.len())
                     .min()
@@ -634,10 +634,10 @@ impl BackendState {
         let mut chars_snippets: Vec<CompletionItem> = Vec::new();
 
         let chars = chars_prefix;
-        let start = if chars_prefix.len() > self.max_unicude_input_prefix_len {
-            chars_prefix.len() - self.max_unicude_input_prefix_len + 1
+        let start = if chars_prefix.len() > self.max_unicode_input_prefix_len {
+            chars_prefix.len() - self.max_unicode_input_prefix_len + 1
         } else {
-            self.min_unicude_input_prefix_len
+            self.min_unicode_input_prefix_len
         };
 
         let l = chars.len();
