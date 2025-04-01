@@ -29,6 +29,7 @@ pub struct StartOptions {
 pub struct BackendSettings {
     pub max_completion_items: usize,
     pub max_chars_prefix_len: usize,
+    pub min_chars_prefix_len: usize,
     pub snippets_first: bool,
     pub snippets_inline_by_word_tail: bool,
     // citation
@@ -45,6 +46,8 @@ pub struct BackendSettings {
 #[derive(Deserialize)]
 pub struct PartialBackendSettings {
     pub max_completion_items: Option<usize>,
+    pub max_chars_prefix_len: Option<usize>,
+    pub min_chars_prefix_len: Option<usize>,
     pub max_path_chars: Option<usize>,
     pub snippets_first: Option<bool>,
     pub snippets_inline_by_word_tail: Option<bool>,
@@ -57,11 +60,15 @@ pub struct PartialBackendSettings {
     pub feature_unicode_input: Option<bool>,
     pub feature_paths: Option<bool>,
     pub feature_citations: Option<bool>,
+
+    #[serde(flatten)]
+    pub extra: Option<serde_json::Value>,
 }
 
 impl Default for BackendSettings {
     fn default() -> Self {
         BackendSettings {
+            min_chars_prefix_len: 2,
             max_completion_items: 100,
             max_chars_prefix_len: 64,
             snippets_first: false,
@@ -85,6 +92,9 @@ impl BackendSettings {
                 .max_completion_items
                 .unwrap_or(self.max_completion_items),
             max_chars_prefix_len: settings.max_path_chars.unwrap_or(self.max_chars_prefix_len),
+            min_chars_prefix_len: settings
+                .min_chars_prefix_len
+                .unwrap_or(self.min_chars_prefix_len),
             snippets_first: settings.snippets_first.unwrap_or(self.snippets_first),
             snippets_inline_by_word_tail: settings
                 .snippets_inline_by_word_tail
@@ -288,9 +298,7 @@ pub struct BackendState {
     snippets: Vec<Snippet>,
     unicode_input: BTreeMap<String, String>,
     max_unicode_input_prefix_len: usize,
-    min_unicode_input_prefix_len: usize,
     max_snippet_input_prefix_len: usize,
-    min_snippet_input_prefix_len: usize,
     rx: mpsc::UnboundedReceiver<BackendRequest>,
 
     #[cfg(feature = "citation")]
@@ -325,20 +333,10 @@ impl BackendState {
                     .map(|s| s.len())
                     .max()
                     .unwrap_or_default(),
-                min_unicode_input_prefix_len: unicode_input
-                    .keys()
-                    .map(|s| s.len())
-                    .min()
-                    .unwrap_or_default(),
                 max_snippet_input_prefix_len: snippets
                     .iter()
                     .map(|s| s.prefix.len())
                     .max()
-                    .unwrap_or_default(),
-                min_snippet_input_prefix_len: snippets
-                    .iter()
-                    .map(|s| s.prefix.len())
-                    .min()
                     .unwrap_or_default(),
                 snippets,
                 unicode_input,
@@ -601,22 +599,36 @@ impl BackendState {
     ) -> impl Iterator<Item = CompletionItem> + 'a {
         let mut chars_snippets: Vec<CompletionItem> = Vec::new();
 
-        let start = if chars_prefix.len() > 10 {
-            chars_prefix.len() - self.max_snippet_input_prefix_len + 1
-        } else {
-            self.min_snippet_input_prefix_len
-        };
+        // let start = if chars_prefix.len() > self.max_snippet_input_prefix_len {
+        //     chars_prefix.len() - self.max_snippet_input_prefix_len
+        // } else {
+        //     self.min_snippet_input_prefix_len
+        // };
 
-        let l = chars_prefix.len();
-        for count in start..=l {
-            let Some(start) = chars_prefix.char_indices().map(|(i, _)| i).nth(l - count) else {
+        for index in 0..=chars_prefix.len() {
+            let Some(part) = chars_prefix.get(index..) else {
                 continue;
             };
-            let prefix = &chars_prefix[start..];
-            if prefix.starts_with(" ") {
+            if part.is_empty() {
                 break;
             }
-            chars_snippets.extend(self.snippets(prefix, chars_prefix, true, doc, params));
+            // try to find tail for prefix to start completion
+            if part.len() > self.max_snippet_input_prefix_len {
+                continue;
+            }
+            if part.len() < self.settings.min_chars_prefix_len {
+                break;
+            }
+            // for index in start..chars_prefix.len() {
+            //     let Some(prefix) = chars_prefix.get(index..) else {
+            //         continue;
+            //     };
+            //     if let Some(first_char) = prefix.chars().next() {
+            //         if !char_is_char_prefix(first_char) {
+            //             break;
+            //         }
+            //     }
+            chars_snippets.extend(self.snippets(part, chars_prefix, true, doc, params));
             if chars_snippets.len() >= self.settings.max_completion_items {
                 break;
             }
@@ -633,29 +645,34 @@ impl BackendState {
     ) -> impl Iterator<Item = CompletionItem> {
         let mut chars_snippets: Vec<CompletionItem> = Vec::new();
 
-        let chars = chars_prefix;
-        let start = if chars_prefix.len() > self.max_unicode_input_prefix_len {
-            chars_prefix.len() - self.max_unicode_input_prefix_len + 1
-        } else {
-            self.min_unicode_input_prefix_len
-        };
-
-        let l = chars.len();
-        for count in start..l + 1 {
-            let Some(start) = chars.char_indices().map(|(i, _)| i).nth(l - count) else {
+        for index in 0..=chars_prefix.len() {
+            let Some(part) = chars_prefix.get(index..) else {
                 continue;
             };
-            let char_prefix = &chars[start..];
+            if part.is_empty() {
+                break;
+            }
+            // try to find tail for prefix to start completion
+            if part.len() > self.max_unicode_input_prefix_len {
+                continue;
+            }
+            if part.len() < self.settings.min_chars_prefix_len {
+                break;
+            }
+
             let items = self
                 .unicode_input
                 .iter()
                 .filter_map(|(prefix, body)| {
-                    if !starts_with(prefix, char_prefix) {
+                    tracing::info!(
+                        "Chars_prefix: {chars_prefix} index:{index} part: {part} prefix:  {prefix}"
+                    );
+                    if !starts_with(prefix, part) {
                         return None;
                     }
                     let line = params.text_document_position.position.line;
                     let start =
-                        params.text_document_position.position.character - char_prefix.len() as u32;
+                        params.text_document_position.position.character - part.len() as u32;
                     let replace_end = params.text_document_position.position.character;
                     let range = Range {
                         start: Position {
