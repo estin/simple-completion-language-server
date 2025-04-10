@@ -3,7 +3,7 @@ use crate::snippets::vscode::VSSnippetsConfig;
 use crate::StartOptions;
 use anyhow::Result;
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Deserialize)]
 pub struct SnippetsConfig {
@@ -16,6 +16,12 @@ pub struct Snippet {
     pub prefix: String,
     pub body: String,
     pub description: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UnicodeInputItem {
+    pub prefix: String,
+    pub body: String,
 }
 
 #[derive(Deserialize)]
@@ -171,52 +177,60 @@ pub fn load_snippets_from_path(
     Ok(snippets)
 }
 
-pub fn load_unicode_input_from_file(path: &std::path::PathBuf) -> Result<BTreeMap<String, String>> {
+pub fn load_unicode_input_from_file(path: &std::path::PathBuf) -> Result<Vec<(String, String)>> {
     tracing::info!("Try load 'unicode input' config from: {path:?}");
 
     let content = std::fs::read_to_string(path)?;
 
     let result = match path.extension().and_then(|v| v.to_str()) {
-        Some("toml") => toml::from_str::<UnicodeInputConfig>(&content)
-            .map_err(|e| anyhow::anyhow!(e))
-            .map(|sc| sc.inner),
+        Some("toml") => toml::from_str::<HashMap<String, String>>(&content)
+            .map(|sc| sc.into_iter().collect())?,
         _ => {
             anyhow::bail!("Unsupported unicode format: {path:?}")
         }
     };
 
-    result
+    Ok(result)
 }
 
 pub fn load_unicode_input_from_path(
-    snippets_path: &std::path::PathBuf,
-) -> Result<BTreeMap<String, String>> {
-    if snippets_path.is_file() {
-        return load_unicode_input_from_file(snippets_path);
-    }
+    filepath: &std::path::PathBuf,
+) -> Result<Vec<UnicodeInputItem>> {
+    let result = if filepath.is_file() {
+        load_unicode_input_from_file(filepath)?
+    } else {
+        let mut result = Vec::new();
+        match std::fs::read_dir(filepath) {
+            Ok(entries) => {
+                for entry in entries {
+                    let Ok(entry) = entry else { continue };
 
-    let mut result = BTreeMap::new();
-    match std::fs::read_dir(snippets_path) {
-        Ok(entries) => {
-            for entry in entries {
-                let Ok(entry) = entry else { continue };
-
-                let path = entry.path();
-                if path.is_dir() {
-                    continue;
-                };
-
-                match load_unicode_input_from_file(&path) {
-                    Ok(r) => result.extend(r),
-                    Err(e) => {
-                        tracing::error!("On read 'unicode input' config from {path:?}: {e}");
+                    let path = entry.path();
+                    if path.is_dir() {
                         continue;
+                    };
+
+                    match load_unicode_input_from_file(&path) {
+                        Ok(r) => result.extend(r),
+                        Err(e) => {
+                            tracing::error!("On read 'unicode input' config from {path:?}: {e}");
+                            continue;
+                        }
                     }
                 }
             }
+            Err(e) => tracing::error!("On read dir {filepath:?}: {e}"),
         }
-        Err(e) => tracing::error!("On read dir {snippets_path:?}: {e}"),
-    }
+        result
+    };
 
-    Ok(result)
+    // sort items from largest to smallest by prefix
+    let mut items = result.into_iter().collect::<Vec<_>>();
+    items.sort_unstable_by(|(a, _), (b, _)| (a.len(), a).cmp(&(b.len(), b)));
+    items.reverse();
+
+    Ok(items
+        .into_iter()
+        .map(|(prefix, body)| UnicodeInputItem { prefix, body })
+        .collect())
 }

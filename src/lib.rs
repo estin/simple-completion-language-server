@@ -3,7 +3,7 @@ use anyhow::Result;
 use ropey::Rope;
 use serde::Deserialize;
 use std::borrow::Cow;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{HashMap, HashSet};
 use std::io::prelude::*;
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::lsp_types::*;
@@ -16,7 +16,7 @@ use regex_cursor::{engines::meta::Regex, Input, RopeyCursor};
 pub mod server;
 pub mod snippets;
 
-use snippets::Snippet;
+use snippets::{Snippet, UnicodeInputItem};
 
 pub struct StartOptions {
     pub home_dir: String,
@@ -296,7 +296,7 @@ pub struct BackendState {
     settings: BackendSettings,
     docs: HashMap<Url, Document>,
     snippets: Vec<Snippet>,
-    unicode_input: BTreeMap<String, String>,
+    unicode_input: Vec<UnicodeInputItem>,
     max_unicode_input_prefix_len: usize,
     max_snippet_input_prefix_len: usize,
     rx: mpsc::UnboundedReceiver<BackendRequest>,
@@ -309,7 +309,7 @@ impl BackendState {
     pub async fn new(
         home_dir: String,
         snippets: Vec<Snippet>,
-        unicode_input: BTreeMap<String, String>,
+        unicode_input: Vec<UnicodeInputItem>,
     ) -> (mpsc::UnboundedSender<BackendRequest>, Self) {
         let (request_tx, request_rx) = mpsc::unbounded_channel::<BackendRequest>();
 
@@ -329,8 +329,8 @@ impl BackendState {
                 settings,
                 docs: HashMap::new(),
                 max_unicode_input_prefix_len: unicode_input
-                    .keys()
-                    .map(|s| s.len())
+                    .iter()
+                    .map(|s| s.prefix.len())
                     .max()
                     .unwrap_or_default(),
                 max_snippet_input_prefix_len: snippets
@@ -663,10 +663,16 @@ impl BackendState {
             let items = self
                 .unicode_input
                 .iter()
-                .filter_map(|(prefix, body)| {
-                    if !starts_with(prefix, part) {
+                .filter_map(|s| {
+                    if !starts_with(&s.prefix, part) {
                         return None;
                     }
+                    tracing::info!(
+                        "Chars prefix: {} index: {}, part: {} {s:?}",
+                        chars_prefix,
+                        index,
+                        part
+                    );
                     let line = params.text_document_position.position.line;
                     let start =
                         params.text_document_position.position.character - part.len() as u32;
@@ -682,14 +688,14 @@ impl BackendState {
                         },
                     };
                     Some(CompletionItem {
-                        label: body.to_string(),
-                        sort_text: Some(prefix.to_string()),
-                        filter_text: Some(format!("{word_prefix}{prefix}")),
+                        label: s.body.to_string(),
+                        filter_text: format!("{word_prefix}{}", s.prefix).into(),
                         kind: Some(CompletionItemKind::TEXT),
+                        documentation: Documentation::String(s.prefix.to_string()).into(),
                         text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
                             replace: range,
                             insert: range,
-                            new_text: body.to_string(),
+                            new_text: s.body.to_string(),
                         })),
                         ..Default::default()
                     })
@@ -701,7 +707,13 @@ impl BackendState {
             }
         }
 
-        chars_snippets.into_iter()
+        chars_snippets
+            .into_iter()
+            .enumerate()
+            .map(move |(index, item)| CompletionItem {
+                sort_text: format!("{:0width$}", index, width = 2).into(),
+                ..item
+            })
     }
 
     fn paths(
