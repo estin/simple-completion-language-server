@@ -1,5 +1,4 @@
 use etcetera::base_strategy::{choose_base_strategy, BaseStrategy};
-use std::collections::BTreeMap;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use xshell::{cmd, Shell};
 
@@ -45,7 +44,7 @@ async fn serve(start_options: &StartOptions) {
     let unicode_input = load_unicode_input_from_path(&start_options.unicode_input_path)
         .unwrap_or_else(|e| {
             tracing::error!("On read 'unicode input' config: {e}");
-            BTreeMap::new()
+            Default::default()
         });
 
     server::start(
@@ -63,8 +62,13 @@ fn help() {
         "usage:
 simple-completion-language-server fetch-external-snippets
     Fetch external snippets (git clone or git pull).
+
 simple-completion-language-server validate-snippets
     Read all snippets to ensure correctness.
+
+simple-completion-language-server validate-unicode-input
+    Read all unicode-input to ensure correctness.
+
 simple-completion-language-server
     Start language server protocol on stdin+stdout."
     );

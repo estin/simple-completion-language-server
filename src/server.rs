@@ -1,5 +1,7 @@
-use crate::{snippets::Snippet, BackendRequest, BackendResponse, BackendState};
-use std::collections::BTreeMap;
+use crate::{
+    snippets::{Snippet, UnicodeInputItem},
+    BackendRequest, BackendResponse, BackendState,
+};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::jsonrpc::Result;
@@ -113,7 +115,7 @@ pub async fn start<I, O>(
     read: I,
     write: O,
     snippets: Vec<Snippet>,
-    unicode_input: BTreeMap<String, String>,
+    unicode_input: Vec<UnicodeInputItem>,
     home_dir: String,
 ) where
     I: AsyncRead + Unpin,
