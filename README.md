@@ -129,23 +129,78 @@ description = "log at debug level"
 
 Configure sources in `~/.config/helix/external-snippets.toml` (or via env `EXTERNAL_SNIPPETS_CONFIG`)
 
-```toml
-[[sources]] # list of sources to load
-name = "friendly-snippets"  # optional name shown on snippet description
-git = "https://github.com/rafamadriz/friendly-snippets.git" # git repo with snippets collections
+1. Declare list of sources by key `[[sources]]`
 
-[[sources.paths]] # list of paths to load on current source
-scope = ["python"]  # optional scopes (language id) for current snippets
-path = "snippets/python/python.json"  # where snippet file or dir located in repo
+2. Optionally, declare paths to load snippets on current source by `[[source.paths]]`.
+
+Highly recommended to declare concrete paths with scopes. To explicit configure required snippets and its scopes.
+
+Snippets suggestion filtered out by document scope.
+
+Scope it's [language id](https://code.visualstudio.com/docs/languages/identifiers#_known-language-identifiers) and **not file extension** by language server protocol.
+
+If `[[source.paths]]` isn't specified for source then all files with extensions `.json` and `.toml` would be tried to load. Scope at that case would be equal filename.
+To apply snippets the filename must be one of known language id.
+
+3. Run commands to fetch and validate snippets
+
+```console
+
+# Clone or update snippets source repos to `~/.config/helix/external-snippets/<repo path>`
+simple-completion-language-server fetch-external-snippets
+
+# Try to find and parse snippets
+simple-completion-language-server validate-snippets
+
 ```
 
+#### Config format for external snippets
+
+```toml
+# first external source to load snippets
+[[sources]] # list of sources to load
+name = "source1" # optional name shown on snippet description 
+git = "https://example.com/source1.git" # git repo with snippets collections
+
+[[sources.paths]] # explicit list of paths to load on current source
+scope = ["scope1", "scope2"] # optional scopes (language id) for current snippets
+path = "path-in-repo/snippets1.json" # where snippet file or dir located in repo
+
+[[sources.paths]]
+scope = ["scope3"]
+path = "path-in-repo/snippets2.json"
+
+# next external source to load snippets
+[[sources]]
+name = "source2"  
+git = "https://example.com/source2.git"
+
+[[sources.paths]]
+scope = ["scope1"]
+path = "path-in-repo-of-source2/snippets1.json"
+```
+
+#### Example
+
+Load python snippets from file https://github.com/rafamadriz/friendly-snippets/blob/main/snippets/python/python.json
+
+File `~/.config/helix/external-snippets.toml`
+
+```toml
+[[sources]] 
+name = "friendly-snippets"  
+git = "https://github.com/rafamadriz/friendly-snippets.git" 
+
+[[sources.paths]] 
+scope = ["python"]  
+path = "snippets/python/python.json"  
+```
 
 Clone or update snippets source repos to `~/.config/helix/external-snippets/<repo path>`
 
 ```console
 $ simple-completion-language-server fetch-external-snippets
 ```
-
 
 Validate snippets
 

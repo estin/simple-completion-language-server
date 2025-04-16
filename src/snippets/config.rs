@@ -4,6 +4,8 @@ use crate::StartOptions;
 use anyhow::Result;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
+use std::fs;
+use std::path::Path;
 
 #[derive(Deserialize)]
 pub struct SnippetsConfig {
@@ -28,6 +30,24 @@ pub struct UnicodeInputItem {
 pub struct UnicodeInputConfig {
     #[serde(flatten)]
     pub inner: BTreeMap<String, String>,
+}
+
+fn walk_dir<F>(dir: &Path, filter: &F, files: &mut Vec<std::path::PathBuf>)
+where
+    F: Fn(&Path) -> bool,
+{
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk_dir(&path, filter, files);
+                } else if filter(&path) {
+                    files.push(path);
+                }
+            }
+        }
+    }
 }
 
 pub fn load_snippets(start_options: &StartOptions) -> Result<Vec<Snippet>> {
@@ -56,22 +76,62 @@ pub fn load_snippets(start_options: &StartOptions) -> Result<Vec<Snippet>> {
         for source in sources {
             let source_name = source.name.as_ref().unwrap_or(&source.git);
 
-            for item in &source.paths {
-                snippets.extend(
-                    load_snippets_from_path(
-                        &base_path.join(source.destination_path()?).join(&item.path),
-                        &item.scope,
-                    )?
-                    .into_iter()
-                    .map(|mut s| {
-                        s.description = Some(format!(
-                            "{source_name}\n\n{}",
-                            s.description.unwrap_or_default(),
-                        ));
-                        s
-                    })
-                    .collect::<Vec<_>>(),
+            let source_dst = source.destination_path()?;
+
+            if source.paths.is_empty() {
+                let mut files = Vec::new();
+                walk_dir(
+                    &base_path.join(&source_dst),
+                    &|filepath| {
+                        let Some(ext) = filepath.extension() else {
+                            return false;
+                        };
+                        ext == "json" || ext == "toml"
+                    },
+                    &mut files,
                 );
+                snippets.extend(
+                    files
+                        .into_iter()
+                        .filter_map(|filepath| match load_snippets_from_path(&filepath, &None) {
+                            Ok(s) => s
+                                .into_iter()
+                                .map(|mut s| {
+                                    s.description = Some(format!(
+                                        "{source_name}\n\n{}",
+                                        s.description.unwrap_or_default(),
+                                    ));
+                                    s
+                                })
+                                .into(),
+                            Err(e) => {
+                                tracing::warn!(
+                                    "Skip. failed to load snippets from: {filepath:?} - {e}"
+                                );
+                                None
+                            }
+                        })
+                        .flatten()
+                        .collect::<Vec<_>>(),
+                );
+            } else {
+                for item in &source.paths {
+                    snippets.extend(
+                        load_snippets_from_path(
+                            &base_path.join(&source_dst).join(&item.path),
+                            &item.scope,
+                        )?
+                        .into_iter()
+                        .map(|mut s| {
+                            s.description = Some(format!(
+                                "{source_name}\n\n{}",
+                                s.description.unwrap_or_default(),
+                            ));
+                            s
+                        })
+                        .collect::<Vec<_>>(),
+                    );
+                }
             }
         }
     }

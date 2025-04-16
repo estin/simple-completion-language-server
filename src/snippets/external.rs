@@ -11,6 +11,7 @@ pub struct ExternalSnippets {
 pub struct SnippetSource {
     pub name: Option<String>,
     pub git: String,
+    #[serde(default)]
     pub paths: Vec<SourcePath>,
 }
 

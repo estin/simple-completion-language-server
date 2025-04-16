@@ -137,7 +137,7 @@ impl TestContext {
                 .await
                 .ok_or_else(|| anyhow::anyhow!("empty response"))?;
             // decode response
-            let payload = response.split('\n').last().unwrap_or_default();
+            let payload = response.split('\n').next_back().unwrap_or_default();
 
             // skip log messages
             if payload.contains("window/logMessage") {
