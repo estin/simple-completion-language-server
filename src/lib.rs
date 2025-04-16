@@ -599,12 +599,6 @@ impl BackendState {
     ) -> impl Iterator<Item = CompletionItem> + 'a {
         let mut chars_snippets: Vec<CompletionItem> = Vec::new();
 
-        // let start = if chars_prefix.len() > self.max_snippet_input_prefix_len {
-        //     chars_prefix.len() - self.max_snippet_input_prefix_len
-        // } else {
-        //     self.min_snippet_input_prefix_len
-        // };
-
         for index in 0..=chars_prefix.len() {
             let Some(part) = chars_prefix.get(index..) else {
                 continue;
@@ -619,16 +613,7 @@ impl BackendState {
             if part.len() < self.settings.min_chars_prefix_len {
                 break;
             }
-            // for index in start..chars_prefix.len() {
-            //     let Some(prefix) = chars_prefix.get(index..) else {
-            //         continue;
-            //     };
-            //     if let Some(first_char) = prefix.chars().next() {
-            //         if !char_is_char_prefix(first_char) {
-            //             break;
-            //         }
-            //     }
-            chars_snippets.extend(self.snippets(part, chars_prefix, true, doc, params));
+            chars_snippets.extend(self.snippets(part, chars_prefix, false, doc, params));
             if chars_snippets.len() >= self.settings.max_completion_items {
                 break;
             }
@@ -1095,7 +1080,7 @@ impl BackendState {
                                     prefix,
                                 ) {
                                     (true, false, true, Some(prefix)) if !prefix.is_empty() => {
-                                        Some(self.snippets(prefix, "", false, doc, &params))
+                                        Some(self.snippets(prefix, "", true, doc, &params))
                                     }
                                     _ => None,
                                 }
