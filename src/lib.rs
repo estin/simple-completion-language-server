@@ -270,7 +270,7 @@ impl std::io::Read for RopeReader<'_> {
                     .find(|(_, ch)| !char_is_word(*ch))
                 {
                     if byte_pos != 0 {
-                        Write::write_all(&mut self.tail, chunk[byte_pos..].as_bytes())?;
+                        Write::write_all(&mut self.tail, &chunk.as_bytes()[byte_pos..])?;
                         &chunk[0..byte_pos]
                     } else {
                         chunk

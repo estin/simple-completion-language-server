@@ -37,14 +37,12 @@ where
     F: Fn(&Path) -> bool,
 {
     if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.is_dir() {
-                    walk_dir(&path, filter, files);
-                } else if filter(&path) {
-                    files.push(path);
-                }
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk_dir(&path, filter, files);
+            } else if filter(&path) {
+                files.push(path);
             }
         }
     }
