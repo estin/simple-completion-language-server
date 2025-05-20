@@ -5,6 +5,7 @@ use serde::Deserialize;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::io::prelude::*;
+use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
 use tower_lsp::lsp_types::*;
 
@@ -138,6 +139,103 @@ pub fn starts_with(source: &str, s: &str) -> bool {
     };
     caseless::default_caseless_match_str(part, s)
 }
+
+enum PathLogic {
+    Full,
+    Tilde,
+    RelativeCurrent,
+    RelativeParent,
+}
+
+struct PathState<'a> {
+    logic: PathLogic,
+    home_dir: &'a str,
+    current_dir: PathBuf,
+    parent_dir: Option<PathBuf>,
+}
+
+impl From<&str> for PathLogic {
+    fn from(s: &str) -> Self {
+        if s.starts_with("~/") {
+            PathLogic::Tilde
+        } else if s.starts_with("./") {
+            PathLogic::RelativeCurrent
+        } else if s.starts_with("../") {
+            PathLogic::RelativeParent
+        } else {
+            PathLogic::Full
+        }
+    }
+}
+
+impl<'a> PathState<'a> {
+    fn new(s: &'a str, home_dir: &'a str, document_path: &'a str) -> Self {
+        let logic = PathLogic::from(s);
+        let current_dir = PathBuf::from(document_path);
+        let current_dir = current_dir
+            .parent()
+            .map(PathBuf::from)
+            .unwrap_or(current_dir);
+        Self {
+            home_dir,
+            parent_dir: if matches!(logic, PathLogic::RelativeParent) {
+                current_dir.parent().map(PathBuf::from)
+            } else {
+                None
+            },
+            logic,
+            current_dir,
+        }
+    }
+
+    fn expand(&'a self, s: &'a str) -> Cow<'a, str> {
+        match self.logic {
+            PathLogic::Full => Cow::Borrowed(s),
+            PathLogic::Tilde => Cow::Owned(s.replacen('~', self.home_dir, 1)),
+            PathLogic::RelativeCurrent => {
+                if let Some(dir) = self.current_dir.to_str() {
+                    tracing::warn!("Can't represent current_dir {:?} as str", self.current_dir);
+                    Cow::Owned(s.replacen(".", dir, 1))
+                } else {
+                    Cow::Borrowed(s)
+                }
+            }
+            PathLogic::RelativeParent => {
+                if let Some(dir) = self.parent_dir.as_ref().and_then(|p| p.to_str()) {
+                    tracing::warn!("Can't represent current_dir {:?} as str", self.current_dir);
+                    Cow::Owned(s.replacen("..", dir, 1))
+                } else {
+                    Cow::Borrowed(s)
+                }
+            }
+        }
+    }
+    fn fold(&'a self, s: &'a str) -> Cow<'a, str> {
+        match self.logic {
+            PathLogic::Full => Cow::Borrowed(s),
+            PathLogic::Tilde => Cow::Owned(s.replacen(self.home_dir, "~", 1)),
+            PathLogic::RelativeCurrent => {
+                if let Some(dir) = self.current_dir.to_str() {
+                    tracing::warn!("Can't represent current_dir {:?} as str", self.current_dir);
+                    Cow::Owned(s.replacen(dir, ".", 1))
+                } else {
+                    Cow::Borrowed(s)
+                }
+            }
+
+            PathLogic::RelativeParent => {
+                if let Some(dir) = self.parent_dir.as_ref().and_then(|p| p.to_str()) {
+                    tracing::warn!("Can't represent current_dir {:?} as str", self.current_dir);
+                    Cow::Owned(s.replacen(dir, "..", 1))
+                } else {
+                    Cow::Borrowed(s)
+                }
+            }
+        }
+    }
+}
+
+impl PathLogic {}
 
 pub struct RopeReader<'a> {
     tail: Vec<u8>,
@@ -706,6 +804,7 @@ impl BackendState {
         word_prefix: &str,
         chars_prefix: &str,
         params: &CompletionParams,
+        current_document: &Document,
     ) -> impl Iterator<Item = CompletionItem> {
         // check is it path
         if !chars_prefix.contains(std::path::MAIN_SEPARATOR) {
@@ -723,6 +822,7 @@ impl BackendState {
         let chars_prefix = if first_char.is_alphabetic()
             || first_char == std::path::MAIN_SEPARATOR
             || first_char == '~'
+            || first_char == '.'
         {
             chars_prefix
         } else {
@@ -730,16 +830,10 @@ impl BackendState {
         };
 
         let chars_prefix_len = chars_prefix.len() as u32;
+        let document_path = current_document.uri.path();
+        let path_state = PathState::new(chars_prefix, &self.home_dir, document_path);
 
-        // expand tilde to home dir
-        let (is_tilde_exapnded, chars_prefix) = if chars_prefix.starts_with("~/") {
-            (
-                true,
-                Cow::Owned(chars_prefix.replacen('~', &self.home_dir, 1)),
-            )
-        } else {
-            (false, Cow::Borrowed(chars_prefix))
-        };
+        let chars_prefix = path_state.expand(chars_prefix);
 
         // build path
         let path = std::path::Path::new(chars_prefix.as_ref());
@@ -777,15 +871,12 @@ impl BackendState {
                     return None;
                 }
 
-                // use fullpath
+                // use full path
                 let path = item.path();
                 let full_path = path.to_str()?;
-                // fold back to tilde
-                let full_path = if is_tilde_exapnded {
-                    Cow::Owned(full_path.replacen(&self.home_dir, "~", 1))
-                } else {
-                    Cow::Borrowed(full_path)
-                };
+
+                // fold back
+                let full_path = path_state.fold(full_path);
 
                 let line = params.text_document_position.position.line;
                 let start = params.text_document_position.position.character - chars_prefix_len;
@@ -1151,6 +1242,7 @@ impl BackendState {
                                         prefix.unwrap_or_default(),
                                         chars_prefix,
                                         &params,
+                                        doc,
                                     ))
                                 } else {
                                     None

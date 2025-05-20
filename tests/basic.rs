@@ -579,6 +579,50 @@ async fn paths() -> anyhow::Result<()> {
         vec!["~/scls-test/sub-folder"]
     );
 
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"./scls-test/su","uri":"file:///tmp/main4.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":14,"line":0},"textDocument":{"uri":"file:///tmp/main4.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| match i.text_edit {
+                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["./scls-test/sub-folder"]
+    );
+
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"../scls-test/su","uri":"file:///tmp/scls-test/main5.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":15,"line":0},"textDocument":{"uri":"file:///tmp/scls-test/main5.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| match i.text_edit {
+                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                _ => None,
+            })
+            .collect::<Vec<_>>(),
+        vec!["../scls-test/sub-folder"]
+    );
+
     Ok(())
 }
 
