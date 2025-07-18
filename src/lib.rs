@@ -77,7 +77,7 @@ impl Default for BackendSettings {
             citation_prefix_trigger: "@".to_string(),
             citation_bibfile_extract_regexp: r#"bibliography:\s*['"\[]*([~\w\./\\-]*)['"\]]*"#
                 .to_string(),
-            feature_words: true,
+            feature_words: false,
             feature_snippets: true,
             feature_unicode_input: false,
             feature_paths: false,

@@ -265,6 +265,20 @@ async fn initialize() -> anyhow::Result<()> {
 async fn completion() -> anyhow::Result<()> {
     let mut context = TestContext::default();
     context.initialize().await?;
+
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "feature_words": true,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"hello\nhe","uri":"file:///tmp/main.py","version":0}}}"#,
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":1},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
@@ -302,6 +316,19 @@ async fn completion() -> anyhow::Result<()> {
 async fn completion_by_quoted_word() -> anyhow::Result<()> {
     let mut context = TestContext::default();
     context.initialize().await?;
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "feature_words": true,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"function(\"hello\")\nhe","uri":"file:///tmp/main.py","version":0}}}"#,
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":1},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
