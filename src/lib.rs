@@ -625,6 +625,7 @@ impl BackendState {
         doc: &'a Document,
         params: &'a CompletionParams,
     ) -> impl Iterator<Item = CompletionItem> + 'a {
+        let mut has_preselect = false;
         self.snippets
             .iter()
             .filter(move |s| {
@@ -683,6 +684,13 @@ impl BackendState {
                         new_text: s.body.to_string(),
                     })),
                     insert_text_format: Some(InsertTextFormat::SNIPPET),
+                    preselect: if !has_preselect && s.prefix == prefix {
+                        has_preselect = true;
+                        true
+                    } else {
+                        false
+                    }
+                    .into(),
                     ..Default::default()
                 }
             })
