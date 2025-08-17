@@ -620,7 +620,6 @@ impl BackendState {
     fn snippets<'a>(
         &'a self,
         prefix: &'a str,
-        filter_text_prefix: &'a str,
         exact_match: bool,
         doc: &'a Document,
         params: &'a CompletionParams,
@@ -660,11 +659,7 @@ impl BackendState {
                 CompletionItem {
                     label: s.prefix.to_owned(),
                     sort_text: Some(s.prefix.to_string()),
-                    filter_text: Some(if filter_text_prefix.is_empty() {
-                        s.prefix.to_string()
-                    } else {
-                        filter_text_prefix.to_string()
-                    }),
+                    filter_text: s.prefix.to_string().into(),
                     kind: Some(CompletionItemKind::SNIPPET),
                     detail: Some(s.body.to_string()),
                     documentation: Some(if let Some(description) = &s.description {
@@ -719,7 +714,7 @@ impl BackendState {
             if part.len() < self.settings.min_chars_prefix_len {
                 break;
             }
-            chars_snippets.extend(self.snippets(part, chars_prefix, false, doc, params));
+            chars_snippets.extend(self.snippets(part, false, doc, params));
             if chars_snippets.len() >= self.settings.max_completion_items {
                 break;
             }
@@ -1179,7 +1174,7 @@ impl BackendState {
                                     prefix,
                                 ) {
                                     (true, false, true, Some(prefix)) if !prefix.is_empty() => {
-                                        Some(self.snippets(prefix, "", true, doc, &params))
+                                        Some(self.snippets(prefix, true, doc, &params))
                                     }
                                     _ => None,
                                 }
@@ -1224,7 +1219,7 @@ impl BackendState {
                                     prefix,
                                 ) {
                                     (true, false, false, Some(prefix)) if !prefix.is_empty() => {
-                                        Some(self.snippets(prefix, "", false, doc, &params))
+                                        Some(self.snippets(prefix, false, doc, &params))
                                     }
                                     _ => None,
                                 }
