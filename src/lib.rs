@@ -30,7 +30,6 @@ pub struct StartOptions {
 pub struct BackendSettings {
     pub max_completion_items: usize,
     pub max_chars_prefix_len: usize,
-    pub min_chars_prefix_len: usize,
     pub snippets_first: bool,
     pub snippets_inline_by_word_tail: bool,
     // citation
@@ -48,7 +47,6 @@ pub struct BackendSettings {
 pub struct PartialBackendSettings {
     pub max_completion_items: Option<usize>,
     pub max_chars_prefix_len: Option<usize>,
-    pub min_chars_prefix_len: Option<usize>,
     pub max_path_chars: Option<usize>,
     pub snippets_first: Option<bool>,
     pub snippets_inline_by_word_tail: Option<bool>,
@@ -69,7 +67,6 @@ pub struct PartialBackendSettings {
 impl Default for BackendSettings {
     fn default() -> Self {
         BackendSettings {
-            min_chars_prefix_len: 2,
             max_completion_items: 100,
             max_chars_prefix_len: 64,
             snippets_first: false,
@@ -93,9 +90,6 @@ impl BackendSettings {
                 .max_completion_items
                 .unwrap_or(self.max_completion_items),
             max_chars_prefix_len: settings.max_path_chars.unwrap_or(self.max_chars_prefix_len),
-            min_chars_prefix_len: settings
-                .min_chars_prefix_len
-                .unwrap_or(self.min_chars_prefix_len),
             snippets_first: settings.snippets_first.unwrap_or(self.snippets_first),
             snippets_inline_by_word_tail: settings
                 .snippets_inline_by_word_tail
@@ -711,9 +705,6 @@ impl BackendState {
             if part.len() > self.max_snippet_input_prefix_len {
                 continue;
             }
-            if part.len() < self.settings.min_chars_prefix_len {
-                break;
-            }
             chars_snippets.extend(self.snippets(part, false, doc, params));
             if chars_snippets.len() >= self.settings.max_completion_items {
                 break;
@@ -741,9 +732,6 @@ impl BackendState {
             // try to find tail for prefix to start completion
             if part.len() > self.max_unicode_input_prefix_len {
                 continue;
-            }
-            if part.len() < self.settings.min_chars_prefix_len {
-                break;
             }
 
             let items = self
