@@ -16,7 +16,7 @@ Based on [comment](https://github.com/helix-editor/helix/pull/3328#issuecomment-
 From GitHub:
 
 ```console
-$ cargo install --git https://github.com/estin/simple-completion-language-server.git
+$ cargo install --locked --git https://github.com/estin/simple-completion-language-server.git
 ```
 
 From local repository:
@@ -24,7 +24,7 @@ From local repository:
 ```console
 $ git clone https://github.com/estin/simple-completion-language-server.git
 $ cd simple-completion-language-server
-$ cargo install --path .
+$ cargo install --locked --path .
 ```
 
 #### Nix
@@ -66,7 +66,6 @@ For Helix on `~/.config/helix/languages.toml`
 command = "simple-completion-language-server"
 
 [language-server.scls.config]
-max_completion_items = 100           # set max completion results len for each group: words, snippets, unicode-input
 feature_words = false                # enable completion by word
 feature_snippets = true              # enable snippets
 snippets_first = true                # completions will return before snippets by default
@@ -243,7 +242,6 @@ And initialize scls with `feature_citations = true`.
 
 ```toml
 [language-server.scls.config]
-max_completion_items = 20
 feature_citations = true
 ```
 

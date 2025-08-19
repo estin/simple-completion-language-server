@@ -215,7 +215,7 @@ fn words_search() -> anyhow::Result<()> {
     let mut words = std::collections::HashSet::new();
 
     let prefix = "BTA";
-    search(prefix, &doc, &ac_searcher(prefix)?, 10, &mut words)?;
+    search(prefix, &doc, &ac_searcher(prefix)?, &mut words)?;
     assert_eq!(
         words.iter().next().map(|v| v.as_str()),
         Some("btask_timeout")
@@ -224,7 +224,7 @@ fn words_search() -> anyhow::Result<()> {
     words.clear();
 
     let prefix = "logge";
-    search(prefix, &doc, &ac_searcher(prefix)?, 10, &mut words)?;
+    search(prefix, &doc, &ac_searcher(prefix)?, &mut words)?;
     assert_eq!(words.iter().next().map(|v| v.as_str()), Some("loggers"));
 
     Ok(())
@@ -449,6 +449,53 @@ async fn snippets_inline_by_word_tail() -> anyhow::Result<()> {
             }))
             .collect::<Vec<_>>(),
         vec!["^2"]
+    );
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn snippets_by_empty_prefix() -> anyhow::Result<()> {
+    let mut context = TestContext::new(
+        vec![
+            snippets::Snippet {
+                scope: Some(vec!["python".to_string()]),
+                prefix: "ma".to_string(),
+                body: "def main(): pass".to_string(),
+                description: None,
+            },
+            snippets::Snippet {
+                scope: Some(vec!["c".to_string()]),
+                prefix: "ma".to_string(),
+                body: "malloc".to_string(),
+                description: None,
+            },
+        ],
+        Default::default(),
+        Default::default(),
+    );
+    context.initialize().await?;
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"","uri":"file:///tmp/main.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":0,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+
+    let lsp_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| i.text_edit.and_then(|l| match l {
+                lsp_types::CompletionTextEdit::InsertAndReplace(t) => Some(t.new_text),
+                _ => None,
+            }))
+            .collect::<Vec<_>>(),
+        vec!["def main(): pass"]
     );
 
     Ok(())

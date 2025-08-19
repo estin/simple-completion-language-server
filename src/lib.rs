@@ -28,7 +28,6 @@ pub struct StartOptions {
 
 #[derive(Deserialize)]
 pub struct BackendSettings {
-    pub max_completion_items: usize,
     pub max_chars_prefix_len: usize,
     pub snippets_first: bool,
     pub snippets_inline_by_word_tail: bool,
@@ -45,7 +44,6 @@ pub struct BackendSettings {
 
 #[derive(Deserialize)]
 pub struct PartialBackendSettings {
-    pub max_completion_items: Option<usize>,
     pub max_chars_prefix_len: Option<usize>,
     pub max_path_chars: Option<usize>,
     pub snippets_first: Option<bool>,
@@ -67,7 +65,6 @@ pub struct PartialBackendSettings {
 impl Default for BackendSettings {
     fn default() -> Self {
         BackendSettings {
-            max_completion_items: 100,
             max_chars_prefix_len: 64,
             snippets_first: false,
             snippets_inline_by_word_tail: false,
@@ -86,9 +83,6 @@ impl Default for BackendSettings {
 impl BackendSettings {
     pub fn apply_partial_settings(&self, settings: PartialBackendSettings) -> Self {
         Self {
-            max_completion_items: settings
-                .max_completion_items
-                .unwrap_or(self.max_completion_items),
             max_chars_prefix_len: settings.max_path_chars.unwrap_or(self.max_chars_prefix_len),
             snippets_first: settings.snippets_first.unwrap_or(self.snippets_first),
             snippets_inline_by_word_tail: settings
@@ -302,7 +296,6 @@ pub fn search(
     prefix: &str,
     text: &Rope,
     ac: &AhoCorasick,
-    max_completion_items: usize,
     result: &mut HashSet<String>,
 ) -> Result<()> {
     let searcher = ac.try_stream_find_iter(RopeReader::new(text))?;
@@ -348,9 +341,6 @@ pub fn search(
         if let Some(item) = item.as_str() {
             if item != prefix && starts_with(item, prefix) {
                 result.insert(item.to_string());
-                if result.len() >= max_completion_items {
-                    return Ok(());
-                }
             }
         }
     }
@@ -566,31 +556,13 @@ impl BackendState {
     fn completion(&self, prefix: &str, current_doc: &Document) -> Result<HashSet<String>> {
         // prepare search pattern
         let ac = ac_searcher(prefix)?;
-        let mut result = HashSet::with_capacity(self.settings.max_completion_items);
+        let mut result = HashSet::with_capacity(100);
 
         // search in current doc at first
-        search(
-            prefix,
-            &current_doc.text,
-            &ac,
-            self.settings.max_completion_items,
-            &mut result,
-        )?;
-        if result.len() >= self.settings.max_completion_items {
-            return Ok(result);
-        }
+        search(prefix, &current_doc.text, &ac, &mut result)?;
 
         for doc in self.docs.values().filter(|doc| doc.uri != current_doc.uri) {
-            search(
-                prefix,
-                &doc.text,
-                &ac,
-                self.settings.max_completion_items,
-                &mut result,
-            )?;
-            if result.len() >= self.settings.max_completion_items {
-                return Ok(result);
-            }
+            search(prefix, &doc.text, &ac, &mut result)?;
         }
 
         Ok(result)
@@ -619,6 +591,7 @@ impl BackendState {
         params: &'a CompletionParams,
     ) -> impl Iterator<Item = CompletionItem> + 'a {
         let mut has_preselect = false;
+
         self.snippets
             .iter()
             .filter(move |s| {
@@ -629,6 +602,10 @@ impl BackendState {
                 };
                 if !filter_by_scope {
                     return false;
+                }
+                if prefix.is_empty() {
+                    tracing::info!("Prefix is empty - for snippet: {}", s.prefix);
+                    return true;
                 }
                 if exact_match {
                     caseless::default_caseless_match_str(s.prefix.as_str(), prefix)
@@ -683,7 +660,6 @@ impl BackendState {
                     ..Default::default()
                 }
             })
-            .take(self.settings.max_completion_items)
     }
 
     fn snippets_by_word_tail<'a>(
@@ -693,6 +669,10 @@ impl BackendState {
         params: &'a CompletionParams,
     ) -> impl Iterator<Item = CompletionItem> + 'a {
         let mut chars_snippets: Vec<CompletionItem> = Vec::new();
+        if chars_prefix.is_empty() {
+            chars_snippets.extend(self.snippets(chars_prefix, false, doc, params));
+            return chars_snippets.into_iter();
+        }
 
         for index in 0..=chars_prefix.len() {
             let Some(part) = chars_prefix.get(index..) else {
@@ -706,9 +686,6 @@ impl BackendState {
                 continue;
             }
             chars_snippets.extend(self.snippets(part, false, doc, params));
-            if chars_snippets.len() >= self.settings.max_completion_items {
-                break;
-            }
         }
 
         chars_snippets.into_iter()
@@ -734,51 +711,43 @@ impl BackendState {
                 continue;
             }
 
-            let items = self
-                .unicode_input
-                .iter()
-                .filter_map(|s| {
-                    if !starts_with(&s.prefix, part) {
-                        return None;
-                    }
-                    tracing::info!(
-                        "Chars prefix: {} index: {}, part: {} {s:?}",
-                        chars_prefix,
-                        index,
-                        part
-                    );
-                    let line = params.text_document_position.position.line;
-                    let start =
-                        params.text_document_position.position.character - part.len() as u32;
-                    let replace_end = params.text_document_position.position.character;
-                    let range = Range {
-                        start: Position {
-                            line,
-                            character: start,
-                        },
-                        end: Position {
-                            line,
-                            character: replace_end,
-                        },
-                    };
-                    Some(CompletionItem {
-                        label: s.body.to_string(),
-                        filter_text: format!("{word_prefix}{}", s.prefix).into(),
-                        kind: Some(CompletionItemKind::TEXT),
-                        documentation: Documentation::String(s.prefix.to_string()).into(),
-                        text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
-                            replace: range,
-                            insert: range,
-                            new_text: s.body.to_string(),
-                        })),
-                        ..Default::default()
-                    })
+            let items = self.unicode_input.iter().filter_map(|s| {
+                if !starts_with(&s.prefix, part) {
+                    return None;
+                }
+                tracing::info!(
+                    "Chars prefix: {} index: {}, part: {} {s:?}",
+                    chars_prefix,
+                    index,
+                    part
+                );
+                let line = params.text_document_position.position.line;
+                let start = params.text_document_position.position.character - part.len() as u32;
+                let replace_end = params.text_document_position.position.character;
+                let range = Range {
+                    start: Position {
+                        line,
+                        character: start,
+                    },
+                    end: Position {
+                        line,
+                        character: replace_end,
+                    },
+                };
+                Some(CompletionItem {
+                    label: s.body.to_string(),
+                    filter_text: format!("{word_prefix}{}", s.prefix).into(),
+                    kind: Some(CompletionItemKind::TEXT),
+                    documentation: Documentation::String(s.prefix.to_string()).into(),
+                    text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
+                        replace: range,
+                        insert: range,
+                        new_text: s.body.to_string(),
+                    })),
+                    ..Default::default()
                 })
-                .take(self.settings.max_completion_items - chars_snippets.len());
+            });
             chars_snippets.extend(items);
-            if chars_snippets.len() >= self.settings.max_completion_items {
-                break;
-            }
         }
 
         chars_snippets
@@ -899,7 +868,6 @@ impl BackendState {
                     ..Default::default()
                 })
             })
-            .take(self.settings.max_completion_items)
             .collect::<Vec<_>>()
             .into_iter()
     }
@@ -932,10 +900,6 @@ impl BackendState {
             .captures_iter(Input::new(cursor))
             .filter_map(|c| c.get_group(1))
         {
-            if items.len() >= self.settings.max_completion_items {
-                break;
-            }
-
             let Some(path) = slice.get_byte_slice(span.start..span.end) else {
                 tracing::error!("Failed to get path by span");
                 continue;
@@ -968,99 +932,93 @@ impl BackendState {
                 Ok(r) => r,
             };
 
-            items.extend(
-                bib.iter()
-                    .filter_map(|b| {
-                        let matched = starts_with(&b.key, word_prefix);
-                        tracing::debug!(
-                            "Citation from file: {path} prefix: {word_prefix} key: {} - match: {}",
-                            b.key,
-                            matched,
-                        );
-                        if !matched {
-                            return None;
+            items.extend(bib.iter().filter_map(|b| {
+                let matched = starts_with(&b.key, word_prefix);
+                tracing::debug!(
+                    "Citation from file: {path} prefix: {word_prefix} key: {} - match: {}",
+                    b.key,
+                    matched,
+                );
+                if !matched {
+                    return None;
+                }
+                let line = params.text_document_position.position.line;
+                let start =
+                    params.text_document_position.position.character - word_prefix.len() as u32;
+                let replace_end = params.text_document_position.position.character;
+                let range = Range {
+                    start: Position {
+                        line,
+                        character: start,
+                    },
+                    end: Position {
+                        line,
+                        character: replace_end,
+                    },
+                };
+                let documentation = {
+                    let entry_type = b.entry_type.to_string();
+                    let title = b
+                        .title()
+                        .ok()?
+                        .iter()
+                        .map(|chunk| chunk.v.get())
+                        .collect::<Vec<_>>()
+                        .join("");
+                    let authors = b
+                        .author()
+                        .ok()?
+                        .into_iter()
+                        .map(|person| person.to_string())
+                        .collect::<Vec<_>>()
+                        .join(",");
+
+                    let date = match b.date() {
+                        Ok(d) => match d {
+                            biblatex::PermissiveType::Typed(date) => date.to_chunks(),
+                            biblatex::PermissiveType::Chunks(v) => v,
                         }
-                        let line = params.text_document_position.position.line;
-                        let start = params.text_document_position.position.character
-                            - word_prefix.len() as u32;
-                        let replace_end = params.text_document_position.position.character;
-                        let range = Range {
-                            start: Position {
-                                line,
-                                character: start,
-                            },
-                            end: Position {
-                                line,
-                                character: replace_end,
-                            },
-                        };
-                        let documentation = {
-                            let entry_type = b.entry_type.to_string();
-                            let title = b
-                                .title()
-                                .ok()?
-                                .iter()
-                                .map(|chunk| chunk.v.get())
-                                .collect::<Vec<_>>()
-                                .join("");
-                            let authors = b
-                                .author()
-                                .ok()?
-                                .into_iter()
-                                .map(|person| person.to_string())
-                                .collect::<Vec<_>>()
-                                .join(",");
+                        .iter()
+                        .map(|chunk| chunk.v.get())
+                        .collect::<Vec<_>>()
+                        .join(""),
+                        Err(e) => {
+                            tracing::error!("On parse date field on entry {b:?}: {e}");
+                            String::new()
+                        }
+                    };
 
-                            let date = match b.date() {
-                                Ok(d) => match d {
-                                    biblatex::PermissiveType::Typed(date) => date.to_chunks(),
-                                    biblatex::PermissiveType::Chunks(v) => v,
-                                }
-                                .iter()
-                                .map(|chunk| chunk.v.get())
-                                .collect::<Vec<_>>()
-                                .join(""),
-                                Err(e) => {
-                                    tracing::error!("On parse date field on entry {b:?}: {e}");
-                                    String::new()
-                                }
-                            };
-
-                            Some(format!(
-                                "# {title:?}\n*{authors}*\n\n{entry_type}{}",
-                                if date.is_empty() {
-                                    date
-                                } else {
-                                    format!(", {date}")
-                                }
-                            ))
-                        };
-                        Some(CompletionItem {
-                            label: format!("@{}", b.key),
-                            sort_text: Some(word_prefix.to_string()),
-                            filter_text: Some(word_prefix.to_string()),
-                            kind: Some(CompletionItemKind::REFERENCE),
-                            text_edit: Some(CompletionTextEdit::InsertAndReplace(
-                                InsertReplaceEdit {
-                                    replace: range,
-                                    insert: range,
-                                    new_text: b.key.to_string(),
-                                },
-                            )),
-                            documentation: Some(Documentation::MarkupContent(MarkupContent {
-                                kind: MarkupKind::Markdown,
-                                value: documentation.unwrap_or_else(|| {
-                                    format!(
-                                        "'''{}'''\n\n*fallback to biblatex format*",
-                                        b.to_biblatex_string()
-                                    )
-                                }),
-                            })),
-                            ..Default::default()
-                        })
-                    })
-                    .take(self.settings.max_completion_items - items.len()),
-            );
+                    Some(format!(
+                        "# {title:?}\n*{authors}*\n\n{entry_type}{}",
+                        if date.is_empty() {
+                            date
+                        } else {
+                            format!(", {date}")
+                        }
+                    ))
+                };
+                Some(CompletionItem {
+                    label: format!("@{}", b.key),
+                    sort_text: Some(word_prefix.to_string()),
+                    filter_text: Some(word_prefix.to_string()),
+                    kind: Some(CompletionItemKind::REFERENCE),
+                    text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
+                        replace: range,
+                        insert: range,
+                        new_text: b.key.to_string(),
+                    })),
+                    documentation: Some(Documentation::MarkupContent(MarkupContent {
+                        kind: MarkupKind::Markdown,
+                        value: documentation.unwrap_or_else(|| {
+                            format!(
+                                "'''{}'''\n\n*fallback to biblatex format*",
+                                b.to_biblatex_string()
+                            )
+                        }),
+                    })),
+                    ..Default::default()
+                })
+            }));
         }
 
         items.into_iter()
@@ -1113,17 +1071,9 @@ impl BackendState {
                         continue;
                     };
 
-                    let Some(chars_prefix) = chars_prefix else {
-                        if tx
-                            .send(Err(anyhow::anyhow!("Failed to get char prefix")))
-                            .is_err()
-                        {
-                            tracing::error!("Error on send completion response");
-                        }
-                        continue;
-                    };
+                    let chars_prefix = chars_prefix.unwrap_or_default();
 
-                    if chars_prefix.is_empty() || chars_prefix.starts_with(' ') {
+                    if chars_prefix.starts_with(' ') {
                         if tx
                             .send(Ok(BackendResponse::CompletionResponse(
                                 CompletionResponse::Array(Vec::new()),
@@ -1146,7 +1096,7 @@ impl BackendState {
                                     self.settings.snippets_first,
                                     prefix,
                                 ) {
-                                    (true, true, true, _) if !chars_prefix.is_empty() => {
+                                    (true, true, true, _) => {
                                         Some(self.snippets_by_word_tail(chars_prefix, doc, &params))
                                     }
                                     _ => None,
@@ -1161,7 +1111,7 @@ impl BackendState {
                                     self.settings.snippets_first,
                                     prefix,
                                 ) {
-                                    (true, false, true, Some(prefix)) if !prefix.is_empty() => {
+                                    (true, false, true, Some(prefix)) => {
                                         Some(self.snippets(prefix, true, doc, &params))
                                     }
                                     _ => None,
@@ -1191,7 +1141,7 @@ impl BackendState {
                                     self.settings.snippets_first,
                                     prefix,
                                 ) {
-                                    (true, true, false, _) if !chars_prefix.is_empty() => {
+                                    (true, true, false, _) => {
                                         Some(self.snippets_by_word_tail(chars_prefix, doc, &params))
                                     }
                                     _ => None,
@@ -1206,7 +1156,7 @@ impl BackendState {
                                     self.settings.snippets_first,
                                     prefix,
                                 ) {
-                                    (true, false, false, Some(prefix)) if !prefix.is_empty() => {
+                                    (true, false, false, Some(prefix)) => {
                                         Some(self.snippets(prefix, false, doc, &params))
                                     }
                                     _ => None,
