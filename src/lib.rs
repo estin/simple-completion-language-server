@@ -586,7 +586,6 @@ impl BackendState {
     fn snippets<'a>(
         &'a self,
         prefix: &'a str,
-        exact_match: bool,
         doc: &'a Document,
         params: &'a CompletionParams,
     ) -> impl Iterator<Item = CompletionItem> + 'a {
@@ -606,11 +605,7 @@ impl BackendState {
                 if prefix.is_empty() {
                     return true;
                 }
-                if exact_match {
-                    caseless::default_caseless_match_str(s.prefix.as_str(), prefix)
-                } else {
-                    starts_with(s.prefix.as_str(), prefix)
-                }
+                starts_with(s.prefix.as_str(), prefix)
             })
             .map(move |s| {
                 let line = params.text_document_position.position.line;
@@ -669,7 +664,7 @@ impl BackendState {
     ) -> impl Iterator<Item = CompletionItem> + 'a {
         let mut chars_snippets: Vec<CompletionItem> = Vec::new();
         if chars_prefix.is_empty() {
-            chars_snippets.extend(self.snippets(chars_prefix, false, doc, params));
+            chars_snippets.extend(self.snippets(chars_prefix, doc, params));
             return chars_snippets.into_iter();
         }
 
@@ -684,7 +679,7 @@ impl BackendState {
             if part.len() > self.max_snippet_input_prefix_len {
                 continue;
             }
-            chars_snippets.extend(self.snippets(part, false, doc, params));
+            chars_snippets.extend(self.snippets(part, doc, params));
         }
 
         chars_snippets.into_iter()
@@ -1111,7 +1106,7 @@ impl BackendState {
                                     prefix,
                                 ) {
                                     (true, false, true, Some(prefix)) => {
-                                        Some(self.snippets(prefix, true, doc, &params))
+                                        Some(self.snippets(prefix, doc, &params))
                                     }
                                     _ => None,
                                 }
@@ -1156,7 +1151,7 @@ impl BackendState {
                                     prefix,
                                 ) {
                                     (true, false, false, Some(prefix)) => {
-                                        Some(self.snippets(prefix, false, doc, &params))
+                                        Some(self.snippets(prefix, doc, &params))
                                     }
                                     _ => None,
                                 }
