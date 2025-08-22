@@ -604,7 +604,6 @@ impl BackendState {
                     return false;
                 }
                 if prefix.is_empty() {
-                    tracing::info!("Prefix is empty - for snippet: {}", s.prefix);
                     return true;
                 }
                 if exact_match {
