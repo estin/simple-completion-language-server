@@ -1066,18 +1066,9 @@ impl BackendState {
                     };
 
                     let chars_prefix = chars_prefix.unwrap_or_default();
+                    let prefix = prefix.unwrap_or_default();
 
-                    if chars_prefix.starts_with(' ') {
-                        if tx
-                            .send(Ok(BackendResponse::CompletionResponse(
-                                CompletionResponse::Array(Vec::new()),
-                            )))
-                            .is_err()
-                        {
-                            tracing::error!("Error on send completion response");
-                        }
-                        continue;
-                    };
+                    let use_prefix = chars_prefix.is_empty() || !prefix.is_empty();
 
                     let base_completion = || {
                         Vec::new()
@@ -1088,7 +1079,7 @@ impl BackendState {
                                     self.settings.feature_snippets,
                                     self.settings.snippets_inline_by_word_tail,
                                     self.settings.snippets_first,
-                                    prefix,
+                                    use_prefix,
                                 ) {
                                     (true, true, true, _) => {
                                         Some(self.snippets_by_word_tail(chars_prefix, doc, &params))
@@ -1103,9 +1094,9 @@ impl BackendState {
                                     self.settings.feature_snippets,
                                     self.settings.snippets_inline_by_word_tail,
                                     self.settings.snippets_first,
-                                    prefix,
+                                    use_prefix,
                                 ) {
-                                    (true, false, true, Some(prefix)) => {
+                                    (true, false, true, true) => {
                                         Some(self.snippets(prefix, doc, &params))
                                     }
                                     _ => None,
@@ -1115,12 +1106,8 @@ impl BackendState {
                             )
                             // words
                             .chain(
-                                if let Some(prefix) = prefix {
-                                    if self.settings.feature_words {
-                                        Some(self.words(prefix, doc))
-                                    } else {
-                                        None
-                                    }
+                                if !prefix.is_empty() && self.settings.feature_words {
+                                    Some(self.words(prefix, doc))
                                 } else {
                                     None
                                 }
@@ -1133,7 +1120,7 @@ impl BackendState {
                                     self.settings.feature_snippets,
                                     self.settings.snippets_inline_by_word_tail,
                                     self.settings.snippets_first,
-                                    prefix,
+                                    use_prefix,
                                 ) {
                                     (true, true, false, _) => {
                                         Some(self.snippets_by_word_tail(chars_prefix, doc, &params))
@@ -1148,9 +1135,9 @@ impl BackendState {
                                     self.settings.feature_snippets,
                                     self.settings.snippets_inline_by_word_tail,
                                     self.settings.snippets_first,
-                                    prefix,
+                                    use_prefix,
                                 ) {
-                                    (true, false, false, Some(prefix)) => {
+                                    (true, false, false, true) => {
                                         Some(self.snippets(prefix, doc, &params))
                                     }
                                     _ => None,
@@ -1160,11 +1147,7 @@ impl BackendState {
                             )
                             .chain(
                                 if self.settings.feature_unicode_input {
-                                    Some(self.unicode_input(
-                                        prefix.unwrap_or_default(),
-                                        chars_prefix,
-                                        &params,
-                                    ))
+                                    Some(self.unicode_input(prefix, chars_prefix, &params))
                                 } else {
                                     None
                                 }
@@ -1173,12 +1156,7 @@ impl BackendState {
                             )
                             .chain(
                                 if self.settings.feature_paths {
-                                    Some(self.paths(
-                                        prefix.unwrap_or_default(),
-                                        chars_prefix,
-                                        &params,
-                                        doc,
-                                    ))
+                                    Some(self.paths(prefix, chars_prefix, &params, doc))
                                 } else {
                                     None
                                 }
@@ -1192,8 +1170,7 @@ impl BackendState {
                     let results: Vec<CompletionItem> = if self.settings.feature_citations
                         & chars_prefix.contains(&self.settings.citation_prefix_trigger)
                     {
-                        self.citations(prefix.unwrap_or_default(), chars_prefix, doc, &params)
-                            .collect()
+                        self.citations(prefix, chars_prefix, doc, &params).collect()
                     } else {
                         base_completion()
                     };
