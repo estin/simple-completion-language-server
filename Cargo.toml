@@ -26,7 +26,7 @@ xshell = "0.2"
 
 # citation completion
 regex-cursor = { version = "0.1", optional = true }
-biblatex = { version = "0.10", optional = true }
+biblatex = { version = "0.11", optional = true }
 
 tracing = "0.1"
 tracing-subscriber = { version =  "0.3", features = ["env-filter", "fmt"] }
