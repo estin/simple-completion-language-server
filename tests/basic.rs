@@ -444,11 +444,12 @@ async fn snippets_inline_by_word_tail() -> anyhow::Result<()> {
         items
             .into_iter()
             .filter_map(|i| i.text_edit.and_then(|l| match l {
-                lsp_types::CompletionTextEdit::InsertAndReplace(t) => Some(t.new_text),
+                lsp_types::CompletionTextEdit::InsertAndReplace(t) =>
+                    Some((i.filter_text.unwrap_or_default(), t.new_text)),
                 _ => None,
             }))
             .collect::<Vec<_>>(),
-        vec!["^2"]
+        vec![("xsq".to_string(), "^2".to_string())]
     );
 
     Ok(())
@@ -475,6 +476,21 @@ async fn snippets_by_empty_prefix() -> anyhow::Result<()> {
         Default::default(),
     );
     context.initialize().await?;
+
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "snippets_inline_by_word_tail": true,
+                    "feature_snippets": true,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
     context.send_all(&[
         r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"","uri":"file:///tmp/main.py","version":0}}}"#,
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":0,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
@@ -710,7 +726,7 @@ async fn citations() -> anyhow::Result<()> {
 bibliography: "/tmp/scls-test-citation/test.bib" # could also be surrounded by brackets instead of quotation marks
 ---
 
-# Heading      
+# Heading
 @b
 "#;
 
@@ -746,7 +762,7 @@ bibliography: "/tmp/scls-test-citation/test.bib" # could also be surrounded by b
 	year = {2023},
 	month = may,
 	doi = {10.5281/zenodo.7974116},
-} 
+}
     "#;
 
     std::fs::write("/tmp/scls-test-citation/test.bib", bib)?;

@@ -588,6 +588,7 @@ impl BackendState {
         prefix: &'a str,
         doc: &'a Document,
         params: &'a CompletionParams,
+        filter_text: Option<&'a str>,
     ) -> impl Iterator<Item = CompletionItem> + 'a {
         let mut has_preselect = false;
 
@@ -624,7 +625,7 @@ impl BackendState {
                 CompletionItem {
                     label: s.prefix.to_owned(),
                     sort_text: Some(s.prefix.to_string()),
-                    filter_text: s.prefix.to_string().into(),
+                    filter_text: filter_text.unwrap_or(&s.prefix).to_string().into(),
                     kind: Some(CompletionItemKind::SNIPPET),
                     detail: Some(s.body.to_string()),
                     documentation: Some(if let Some(description) = &s.description {
@@ -664,7 +665,7 @@ impl BackendState {
     ) -> impl Iterator<Item = CompletionItem> + 'a {
         let mut chars_snippets: Vec<CompletionItem> = Vec::new();
         if chars_prefix.is_empty() {
-            chars_snippets.extend(self.snippets(chars_prefix, doc, params));
+            chars_snippets.extend(self.snippets(chars_prefix, doc, params, None));
             return chars_snippets.into_iter();
         }
 
@@ -679,10 +680,43 @@ impl BackendState {
             if part.len() > self.max_snippet_input_prefix_len {
                 continue;
             }
-            chars_snippets.extend(self.snippets(part, doc, params));
+            chars_snippets.extend(self.snippets(part, doc, params, Some(chars_prefix)));
         }
 
         chars_snippets.into_iter()
+    }
+
+    fn unicode_input_all<'a>(
+        &'a self,
+        params: &'a CompletionParams,
+    ) -> impl Iterator<Item = CompletionItem> + 'a {
+        self.unicode_input.iter().map(|s| {
+            let line = params.text_document_position.position.line;
+            let start = params.text_document_position.position.character;
+            let replace_end = params.text_document_position.position.character;
+            let range = Range {
+                start: Position {
+                    line,
+                    character: start,
+                },
+                end: Position {
+                    line,
+                    character: replace_end,
+                },
+            };
+            CompletionItem {
+                label: s.body.to_string(),
+                filter_text: s.prefix.to_string().into(),
+                kind: Some(CompletionItemKind::TEXT),
+                documentation: Documentation::String(s.prefix.to_string()).into(),
+                text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
+                    replace: range,
+                    insert: range,
+                    new_text: s.body.to_string(),
+                })),
+                ..Default::default()
+            }
+        })
     }
 
     fn unicode_input(
@@ -1068,7 +1102,7 @@ impl BackendState {
                     let chars_prefix = chars_prefix.unwrap_or_default();
                     let prefix = prefix.unwrap_or_default();
 
-                    let use_prefix = chars_prefix.is_empty() || !prefix.is_empty();
+                    let use_prefix = !prefix.is_empty();
 
                     let base_completion = || {
                         Vec::new()
@@ -1079,9 +1113,8 @@ impl BackendState {
                                     self.settings.feature_snippets,
                                     self.settings.snippets_inline_by_word_tail,
                                     self.settings.snippets_first,
-                                    use_prefix,
                                 ) {
-                                    (true, true, true, _) => {
+                                    (true, true, true) => {
                                         Some(self.snippets_by_word_tail(chars_prefix, doc, &params))
                                     }
                                     _ => None,
@@ -1097,7 +1130,7 @@ impl BackendState {
                                     use_prefix,
                                 ) {
                                     (true, false, true, true) => {
-                                        Some(self.snippets(prefix, doc, &params))
+                                        Some(self.snippets(prefix, doc, &params, None))
                                     }
                                     _ => None,
                                 }
@@ -1120,9 +1153,8 @@ impl BackendState {
                                     self.settings.feature_snippets,
                                     self.settings.snippets_inline_by_word_tail,
                                     self.settings.snippets_first,
-                                    use_prefix,
                                 ) {
-                                    (true, true, false, _) => {
+                                    (true, true, false) => {
                                         Some(self.snippets_by_word_tail(chars_prefix, doc, &params))
                                     }
                                     _ => None,
@@ -1138,7 +1170,7 @@ impl BackendState {
                                     use_prefix,
                                 ) {
                                     (true, false, false, true) => {
-                                        Some(self.snippets(prefix, doc, &params))
+                                        Some(self.snippets(prefix, doc, &params, None))
                                     }
                                     _ => None,
                                 }
@@ -1147,7 +1179,17 @@ impl BackendState {
                             )
                             .chain(
                                 if self.settings.feature_unicode_input {
-                                    Some(self.unicode_input(prefix, chars_prefix, &params))
+                                    Some(
+                                        self.unicode_input(prefix, chars_prefix, &params).chain(
+                                            if chars_prefix.is_empty() {
+                                                Some(self.unicode_input_all(&params))
+                                            } else {
+                                                None
+                                            }
+                                            .into_iter()
+                                            .flatten(),
+                                        ),
+                                    )
                                 } else {
                                     None
                                 }
