@@ -588,7 +588,7 @@ impl BackendState {
         prefix: &'a str,
         doc: &'a Document,
         params: &'a CompletionParams,
-        filter_text: Option<&'a str>,
+        filter_text_prefix: Option<&'a str>,
     ) -> impl Iterator<Item = CompletionItem> + 'a {
         let mut has_preselect = false;
 
@@ -625,7 +625,8 @@ impl BackendState {
                 CompletionItem {
                     label: s.prefix.to_owned(),
                     sort_text: Some(s.prefix.to_string()),
-                    filter_text: filter_text.unwrap_or(&s.prefix).to_string().into(),
+                    filter_text: format!("{}{}", filter_text_prefix.unwrap_or_default(), s.prefix)
+                        .into(),
                     kind: Some(CompletionItemKind::SNIPPET),
                     detail: Some(s.body.to_string()),
                     documentation: Some(if let Some(description) = &s.description {
@@ -680,7 +681,9 @@ impl BackendState {
             if part.len() > self.max_snippet_input_prefix_len {
                 continue;
             }
-            chars_snippets.extend(self.snippets(part, doc, params, Some(chars_prefix)));
+
+            let filter_text_prefix = chars_prefix.get(..index);
+            chars_snippets.extend(self.snippets(part, doc, params, filter_text_prefix));
         }
 
         chars_snippets.into_iter()

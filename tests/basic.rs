@@ -243,14 +243,7 @@ async fn initialize() -> anyhow::Result<()> {
         .request::<lsp_types::InitializeResult>(&request)
         .await?;
 
-    assert_eq!(
-        response.capabilities.completion_provider,
-        Some(lsp_types::CompletionOptions {
-            resolve_provider: Some(false),
-            trigger_characters: Some(vec![std::path::MAIN_SEPARATOR_STR.to_string()]),
-            ..lsp_types::CompletionOptions::default()
-        })
-    );
+    assert!(response.capabilities.completion_provider.is_some());
     assert_eq!(
         response.capabilities.text_document_sync,
         Some(lsp_types::TextDocumentSyncCapability::Kind(

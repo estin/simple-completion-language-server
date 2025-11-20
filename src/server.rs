@@ -8,6 +8,8 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+const TRIGGER_CHARS: &str = r#"!#$%&'"()*+,-./:;<=>?@[\]^_`{|}~"#;
+
 #[derive(Debug)]
 pub struct Backend {
     client: Client,
@@ -44,7 +46,7 @@ impl LanguageServer for Backend {
                 )),
                 completion_provider: Some(CompletionOptions {
                     resolve_provider: Some(false),
-                    trigger_characters: Some(vec![std::path::MAIN_SEPARATOR_STR.to_string()]),
+                    trigger_characters: Some(TRIGGER_CHARS.chars().map(String::from).collect()),
                     ..CompletionOptions::default()
                 }),
                 ..Default::default()
