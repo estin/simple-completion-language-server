@@ -1133,7 +1133,7 @@ impl BackendState {
                                     use_prefix,
                                 ) {
                                     (true, false, true, true) => {
-                                        Some(self.snippets(prefix, doc, &params, None))
+                                        Some(self.snippets(chars_prefix, doc, &params, None))
                                     }
                                     _ => None,
                                 }
@@ -1173,7 +1173,7 @@ impl BackendState {
                                     use_prefix,
                                 ) {
                                     (true, false, false, true) => {
-                                        Some(self.snippets(prefix, doc, &params, None))
+                                        Some(self.snippets(chars_prefix, doc, &params, None))
                                     }
                                     _ => None,
                                 }
