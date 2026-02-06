@@ -603,9 +603,7 @@ impl BackendState {
                 if !filter_by_scope {
                     return false;
                 }
-                if prefix.is_empty() {
-                    return true;
-                }
+
                 starts_with(s.prefix.as_str(), prefix)
             })
             .map(move |s| {
@@ -1103,9 +1101,8 @@ impl BackendState {
                     };
 
                     let chars_prefix = chars_prefix.unwrap_or_default();
-                    let prefix = prefix.unwrap_or_default();
 
-                    let use_prefix = !prefix.is_empty();
+                    let prefix = prefix.unwrap_or_default();
 
                     let base_completion = || {
                         Vec::new()
@@ -1130,7 +1127,7 @@ impl BackendState {
                                     self.settings.feature_snippets,
                                     self.settings.snippets_inline_by_word_tail,
                                     self.settings.snippets_first,
-                                    use_prefix,
+                                    !chars_prefix.is_empty(),
                                 ) {
                                     (true, false, true, true) => {
                                         Some(self.snippets(chars_prefix, doc, &params, None))
@@ -1170,7 +1167,7 @@ impl BackendState {
                                     self.settings.feature_snippets,
                                     self.settings.snippets_inline_by_word_tail,
                                     self.settings.snippets_first,
-                                    use_prefix,
+                                    !chars_prefix.is_empty(),
                                 ) {
                                     (true, false, false, true) => {
                                         Some(self.snippets(chars_prefix, doc, &params, None))
