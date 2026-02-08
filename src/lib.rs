@@ -626,8 +626,12 @@ impl BackendState {
                     filter_text: format!("{}{}", filter_text_prefix.unwrap_or_default(), s.prefix)
                         .into(),
                     kind: Some(CompletionItemKind::SNIPPET),
-                    detail: Some(s.body.to_string()),
-                    documentation: Some(if let Some(description) = &s.description {
+                    detail: if s.description.is_none() {
+                        Some(s.body.to_string())
+                    } else {
+                        None
+                    },
+                    documentation: s.description.as_ref().map(|description| {
                         Documentation::MarkupContent(MarkupContent {
                             kind: MarkupKind::Markdown,
                             value: format!(
@@ -635,8 +639,6 @@ impl BackendState {
                                 doc.language_id, s.body
                             ),
                         })
-                    } else {
-                        Documentation::String(s.body.to_string())
                     }),
                     text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
                         replace: range,
