@@ -568,7 +568,12 @@ impl BackendState {
         Ok(result)
     }
 
-    fn words(&self, prefix: &str, doc: &Document) -> impl Iterator<Item = CompletionItem> {
+    fn words<'a>(
+        &self,
+        prefix: &'a str,
+        doc: &'a Document,
+        params: &'a CompletionParams,
+    ) -> impl Iterator<Item = CompletionItem> + 'a {
         match self.completion(prefix, doc) {
             Ok(words) => words.into_iter(),
             Err(e) => {
@@ -576,10 +581,30 @@ impl BackendState {
                 HashSet::new().into_iter()
             }
         }
-        .map(|word| CompletionItem {
-            label: word,
-            kind: Some(CompletionItemKind::TEXT),
-            ..Default::default()
+        .map(|word| {
+            let line = params.text_document_position.position.line;
+            let start = params.text_document_position.position.character - prefix.len() as u32;
+            let replace_end = params.text_document_position.position.character;
+            let range = Range {
+                start: Position {
+                    line,
+                    character: start,
+                },
+                end: Position {
+                    line,
+                    character: replace_end,
+                },
+            };
+            CompletionItem {
+                label: word.clone(),
+                text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
+                    replace: range,
+                    insert: range,
+                    new_text: word.to_string(),
+                })),
+                kind: Some(CompletionItemKind::TEXT),
+                ..Default::default()
+            }
         })
     }
 
@@ -1142,7 +1167,7 @@ impl BackendState {
                             // words
                             .chain(
                                 if !prefix.is_empty() && self.settings.feature_words {
-                                    Some(self.words(prefix, doc))
+                                    Some(self.words(prefix, doc, &params))
                                 } else {
                                     None
                                 }
