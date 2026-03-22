@@ -4,9 +4,9 @@ use crate::{
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{mpsc, oneshot};
-use tower_lsp::jsonrpc::Result;
-use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
+use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::ls_types::*;
+use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
 const TRIGGER_CHARS: &str = r#"!#$%&'"()*+,-./:;<=>?@[\]^_`{|}~"#;
 
@@ -35,7 +35,6 @@ impl Backend {
     }
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for Backend {
     async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
         Ok(InitializeResult {
@@ -91,18 +90,18 @@ impl LanguageServer for Backend {
 
         self.send_request(BackendRequest::CompletionRequest((tx, params)))
             .await
-            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            .map_err(|_| tower_lsp_server::jsonrpc::Error::internal_error())?;
 
         let Ok(result) = rx.await else {
             self.log_err("Error on receive completion response").await;
-            return Err(tower_lsp::jsonrpc::Error::internal_error());
+            return Err(tower_lsp_server::jsonrpc::Error::internal_error());
         };
 
         match result {
             Ok(BackendResponse::CompletionResponse(r)) => Ok(Some(r)),
             Err(e) => {
                 self.log_err(&format!("Completion error: {e}")).await;
-                return Err(tower_lsp::jsonrpc::Error::internal_error());
+                Err(tower_lsp_server::jsonrpc::Error::internal_error())
             }
         }
     }

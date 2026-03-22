@@ -6,7 +6,7 @@ use std::str::FromStr;
 use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use tower_lsp::{jsonrpc, lsp_types};
+use tower_lsp_server::{jsonrpc, ls_types};
 
 pub struct AsyncIn(UnboundedReceiver<String>);
 pub struct AsyncOut(UnboundedSender<String>);
@@ -165,7 +165,7 @@ impl TestContext {
             .finish();
 
         let _ = self
-            .request::<lsp_types::InitializeResult>(&request)
+            .request::<ls_types::InitializeResult>(&request)
             .await?;
 
         Ok(())
@@ -240,14 +240,14 @@ async fn initialize() -> anyhow::Result<()> {
         .finish();
 
     let response = context
-        .request::<lsp_types::InitializeResult>(&request)
+        .request::<ls_types::InitializeResult>(&request)
         .await?;
 
     assert!(response.capabilities.completion_provider.is_some());
     assert_eq!(
         response.capabilities.text_document_sync,
-        Some(lsp_types::TextDocumentSyncCapability::Kind(
-            lsp_types::TextDocumentSyncKind::INCREMENTAL,
+        Some(ls_types::TextDocumentSyncCapability::Kind(
+            ls_types::TextDocumentSyncKind::INCREMENTAL,
         ))
     );
 
@@ -277,9 +277,9 @@ async fn completion() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":1},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -294,9 +294,9 @@ async fn completion() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":1},"textDocument":{"uri":"file:///tmp/main2.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -327,9 +327,9 @@ async fn completion_by_quoted_word() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":1},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -368,9 +368,9 @@ async fn snippets() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -379,7 +379,7 @@ async fn snippets() -> anyhow::Result<()> {
         items
             .into_iter()
             .filter_map(|i| i.text_edit.and_then(|l| match l {
-                lsp_types::CompletionTextEdit::InsertAndReplace(t) => Some(t.new_text),
+                ls_types::CompletionTextEdit::InsertAndReplace(t) => Some(t.new_text),
                 _ => None,
             }))
             .collect::<Vec<_>>(),
@@ -426,9 +426,9 @@ async fn snippets_inline_by_word_tail() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":3,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -437,7 +437,7 @@ async fn snippets_inline_by_word_tail() -> anyhow::Result<()> {
         items
             .into_iter()
             .filter_map(|i| i.text_edit.and_then(|l| match l {
-                lsp_types::CompletionTextEdit::InsertAndReplace(t) =>
+                ls_types::CompletionTextEdit::InsertAndReplace(t) =>
                     Some((i.filter_text.unwrap_or_default(), t.new_text)),
                 _ => None,
             }))
@@ -489,9 +489,9 @@ async fn snippets_by_empty_prefix() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":0,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -500,7 +500,7 @@ async fn snippets_by_empty_prefix() -> anyhow::Result<()> {
         items
             .into_iter()
             .filter_map(|i| i.text_edit.and_then(|l| match l {
-                lsp_types::CompletionTextEdit::InsertAndReplace(t) => Some(t.new_text),
+                ls_types::CompletionTextEdit::InsertAndReplace(t) => Some(t.new_text),
                 _ => None,
             }))
             .collect::<Vec<_>>(),
@@ -551,9 +551,9 @@ async fn unicode_input() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":5,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -561,7 +561,7 @@ async fn unicode_input() -> anyhow::Result<()> {
         items
             .into_iter()
             .filter_map(|i| match i.text_edit {
-                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                Some(ls_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
                 _ => None,
             })
             .collect::<Vec<_>>(),
@@ -601,9 +601,9 @@ async fn paths() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":15,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -611,7 +611,7 @@ async fn paths() -> anyhow::Result<()> {
         items
             .into_iter()
             .filter_map(|i| match i.text_edit {
-                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                Some(ls_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
                 _ => None,
             })
             .collect::<Vec<_>>(),
@@ -623,9 +623,9 @@ async fn paths() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":17,"line":0},"textDocument":{"uri":"file:///tmp/main2.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -633,7 +633,7 @@ async fn paths() -> anyhow::Result<()> {
         items
             .into_iter()
             .filter_map(|i| match i.text_edit {
-                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                Some(ls_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
                 _ => None,
             })
             .collect::<Vec<_>>(),
@@ -645,9 +645,9 @@ async fn paths() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":14,"line":0},"textDocument":{"uri":"file:///tmp/main3.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -655,7 +655,7 @@ async fn paths() -> anyhow::Result<()> {
         items
             .into_iter()
             .filter_map(|i| match i.text_edit {
-                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                Some(ls_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
                 _ => None,
             })
             .collect::<Vec<_>>(),
@@ -667,9 +667,9 @@ async fn paths() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":14,"line":0},"textDocument":{"uri":"file:///tmp/main4.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -677,7 +677,7 @@ async fn paths() -> anyhow::Result<()> {
         items
             .into_iter()
             .filter_map(|i| match i.text_edit {
-                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                Some(ls_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
                 _ => None,
             })
             .collect::<Vec<_>>(),
@@ -689,9 +689,9 @@ async fn paths() -> anyhow::Result<()> {
         r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":15,"line":0},"textDocument":{"uri":"file:///tmp/scls-test/main5.py"}},"id":3}"#
     ]).await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -699,7 +699,7 @@ async fn paths() -> anyhow::Result<()> {
         items
             .into_iter()
             .filter_map(|i| match i.text_edit {
-                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                Some(ls_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
                 _ => None,
             })
             .collect::<Vec<_>>(),
@@ -815,9 +815,9 @@ bibliography: "/tmp/scls-test-citation/test.bib" # could also be surrounded by b
         ])
         .await?;
 
-    let response = context.recv::<lsp_types::CompletionResponse>().await?;
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
 
-    let lsp_types::CompletionResponse::Array(items) = response else {
+    let ls_types::CompletionResponse::Array(items) = response else {
         anyhow::bail!("completion array expected")
     };
 
@@ -827,7 +827,7 @@ bibliography: "/tmp/scls-test-citation/test.bib" # could also be surrounded by b
         items
             .into_iter()
             .filter_map(|i| match i.text_edit {
-                Some(lsp_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+                Some(ls_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
                 _ => None,
             })
             .collect::<Vec<_>>(),

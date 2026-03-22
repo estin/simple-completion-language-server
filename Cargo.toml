@@ -16,7 +16,7 @@ anyhow = "1.0"
 ropey = "1.6"
 aho-corasick = "1.1"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "io-std", "macros"] }
-tower-lsp = { version = "0.20", features = ["runtime-tokio"] }
+tower-lsp-server = { version = "0.23", features = ["runtime-tokio"] }
 serde = { version = "1", features = ["serde_derive"] }
 serde_json = { version = "1" }
 caseless = "0.2"
@@ -30,7 +30,7 @@ biblatex = { version = "0.11", optional = true }
 
 tracing = "0.1"
 tracing-subscriber = { version =  "0.3", features = ["env-filter", "fmt"] }
-tracing-appender = "0.2" 
+tracing-appender = "0.2"
 
 [dev-dependencies]
 test-log = { version = "0.2", default-features = false, features = ["trace"] }
