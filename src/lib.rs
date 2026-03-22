@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::prelude::*;
 use std::path::PathBuf;
 use tokio::sync::{mpsc, oneshot};
-use tower_lsp::lsp_types::*;
+use tower_lsp_server::ls_types::*;
 
 #[cfg(feature = "citation")]
 use biblatex::Type;
@@ -368,7 +368,7 @@ pub enum BackendResponse {
 }
 
 pub struct Document {
-    uri: Url,
+    uri: Uri,
     text: Rope,
     language_id: String,
 }
@@ -376,7 +376,7 @@ pub struct Document {
 pub struct BackendState {
     home_dir: String,
     settings: BackendSettings,
-    docs: HashMap<Url, Document>,
+    docs: HashMap<Uri, Document>,
     snippets: Vec<Snippet>,
     unicode_input: Vec<UnicodeInputItem>,
     max_unicode_input_prefix_len: usize,
@@ -429,13 +429,19 @@ impl BackendState {
 
     fn save_doc(&mut self, params: DidSaveTextDocumentParams) -> Result<()> {
         let Some(doc) = self.docs.get_mut(&params.text_document.uri) else {
-            anyhow::bail!("Document {} not found", params.text_document.uri)
+            anyhow::bail!("Document {} not found", params.text_document.uri.as_str())
         };
         doc.text = if let Some(text) = &params.text {
             Rope::from_str(text)
         } else {
             // Sync read content from file
-            let file = std::fs::File::open(params.text_document.uri.path())?;
+            let file = std::fs::File::open(
+                params
+                    .text_document
+                    .uri
+                    .to_file_path()
+                    .ok_or_else(|| anyhow::anyhow!("Uri is not a file path"))?,
+            )?;
             Rope::from_reader(file)?
         };
         Ok(())
@@ -443,7 +449,7 @@ impl BackendState {
 
     fn change_doc(&mut self, params: DidChangeTextDocumentParams) -> Result<()> {
         let Some(doc) = self.docs.get_mut(&params.text_document.uri) else {
-            tracing::error!("Doc {} not found", params.text_document.uri);
+            tracing::error!("Doc {} not found", params.text_document.uri.as_str());
             return Ok(());
         };
         for change in params.clone().content_changes {
@@ -510,7 +516,7 @@ impl BackendState {
         else {
             anyhow::bail!(
                 "Document {} not found",
-                params.text_document_position.text_document.uri
+                params.text_document_position.text_document.uri.as_str()
             )
         };
 
@@ -772,10 +778,10 @@ impl BackendState {
                     return None;
                 }
                 tracing::info!(
-                    "Chars prefix: {} index: {}, part: {} {s:?}",
+                    "Chars prefix: {} index: {} part: {:?}",
                     chars_prefix,
                     index,
-                    part
+                    s
                 );
                 let line = params.text_document_position.position.line;
                 let start = params.text_document_position.position.character - part.len() as u32;
@@ -846,7 +852,12 @@ impl BackendState {
         };
 
         let chars_prefix_len = chars_prefix.len() as u32;
-        let document_path = current_document.uri.path();
+        let Some(document_path) = current_document.uri.to_file_path() else {
+            return Vec::new().into_iter();
+        };
+        let Some(document_path) = document_path.to_str() else {
+            return Vec::new().into_iter();
+        };
         let path_state = PathState::new(chars_prefix, &self.home_dir, document_path);
 
         let chars_prefix = path_state.expand(chars_prefix);
@@ -1045,7 +1056,7 @@ impl BackendState {
                     };
 
                     Some(format!(
-                        "# {title:?}\n*{authors}*\n\n{entry_type}{}",
+                        "# {title}\n*{authors}*\n\n{entry_type}{}",
                         if date.is_empty() {
                             date
                         } else {
@@ -1065,12 +1076,12 @@ impl BackendState {
                     })),
                     documentation: Some(Documentation::MarkupContent(MarkupContent {
                         kind: MarkupKind::Markdown,
-                        value: documentation.unwrap_or_else(|| {
-                            format!(
-                                "'''{}'''\n\n*fallback to biblatex format*",
-                                b.to_biblatex_string()
-                            )
-                        }),
+                            value: documentation.unwrap_or_else(|| {
+                                format!(
+                                    "'''{}'''\n\n*fallback to biblatex format*",
+                                    b.to_biblatex_string()
+                                )
+                            }),
                     })),
                     ..Default::default()
                 })
@@ -1248,7 +1259,9 @@ impl BackendState {
                     let results: Vec<CompletionItem> = base_completion();
 
                     tracing::debug!(
-                        "completion request by prefix: {prefix:?} chars prefix: {chars_prefix:?} took {:.2}ms with {} result items",
+                        "completion request by prefix: {} chars prefix: {} took {:.2}ms with {} result items",
+                        prefix,
+                        chars_prefix,
                         now.elapsed().as_millis(),
                         results.len(),
                     );
