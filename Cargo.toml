@@ -20,7 +20,7 @@ tower-lsp-server = { version = "0.23", features = ["runtime-tokio"] }
 serde = { version = "1", features = ["serde_derive"] }
 serde_json = { version = "1" }
 caseless = "0.2"
-toml = "1.0"
+toml = "1.1"
 etcetera = "0.11"
 xshell = "0.2"
 
