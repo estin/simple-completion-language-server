@@ -589,7 +589,7 @@ impl BackendState {
         }
         .map(|word| {
             let line = params.text_document_position.position.line;
-            let start = params.text_document_position.position.character - prefix.len() as u32;
+            let start = params.text_document_position.position.character - prefix.chars().count() as u32;
             let replace_end = params.text_document_position.position.character;
             let range = Range {
                 start: Position {
@@ -639,7 +639,7 @@ impl BackendState {
             })
             .map(move |s| {
                 let line = params.text_document_position.position.line;
-                let start = params.text_document_position.position.character - prefix.len() as u32;
+                let start = params.text_document_position.position.character - prefix.chars().count() as u32;
                 let replace_end = params.text_document_position.position.character;
                 let range = Range {
                     start: Position {
@@ -784,7 +784,7 @@ impl BackendState {
                     s
                 );
                 let line = params.text_document_position.position.line;
-                let start = params.text_document_position.position.character - part.len() as u32;
+                let start = params.text_document_position.position.character - part.chars().count() as u32;
                 let replace_end = params.text_document_position.position.character;
                 let range = Range {
                     start: Position {
@@ -1011,7 +1011,7 @@ impl BackendState {
                 }
                 let line = params.text_document_position.position.line;
                 let start =
-                    params.text_document_position.position.character - word_prefix.len() as u32;
+                    params.text_document_position.position.character - word_prefix.chars().count() as u32;
                 let replace_end = params.text_document_position.position.character;
                 let range = Range {
                     start: Position {
