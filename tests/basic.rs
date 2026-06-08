@@ -838,3 +838,139 @@ bibliography: "/tmp/scls-test-citation/test.bib" # could also be surrounded by b
     );
     Ok(())
 }
+
+#[test_log::test(tokio::test)]
+#[cfg(feature = "citation")]
+async fn citations_fallback() -> anyhow::Result<()> {
+    // Test that citation_fallback_bibfile_path works alongside bibliography in document
+    // Completions should come from both sources
+    std::fs::create_dir_all("/tmp/scls-test-citation-fallback")?;
+
+    // Bibliography file referenced in the document
+    let doc_bib = r#"
+@online{fa_doc_entry_1,
+    author = {Doc, Author},
+    title = {{Document Entry One}},
+    date = {2024-01-01},
+}
+
+@article{fa_doc_entry_2,
+    author = {Another, Author},
+    title = {{Document Entry Two}},
+    year = {2023},
+}
+    "#;
+
+    let doc_bib_path = "/tmp/scls-test-citation-fallback/doc.bib";
+    std::fs::write(doc_bib_path, doc_bib)?;
+
+    // Fallback bibliography file
+    let fallback_bib = r#"
+@online{fallback_entry_1,
+    author = {Fallback, Author},
+    title = {{Fallback Entry One}},
+    date = {2024-01-01},
+}
+
+@article{fallback_entry_2,
+    author = {Another, Author},
+    title = {{Fallback Entry Two}},
+    year = {2023},
+}
+    "#;
+
+    let citation_fallback_bibfile_path = "/tmp/scls-test-citation-fallback/fallback.bib";
+    std::fs::write(citation_fallback_bibfile_path, fallback_bib)?;
+
+    let mut context = TestContext::default();
+    context.initialize().await?;
+
+    // Configure with citation_fallback_bibfile_path
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "feature_citations": true,
+                    "feature_words": false,
+                    "feature_snippets": false,
+                    "feature_unicode_input": false,
+                    "feature_paths": false,
+                    "citation_fallback_bibfile_path": citation_fallback_bibfile_path,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
+    // Document WITH bibliography frontmatter AND fallback configured
+    let doc = format!(r#"
+---
+bibliography: "{doc_bib_path}"
+---
+
+# Heading
+@fa
+"#);
+
+    context
+        .send_all(&[
+            &serde_json::to_string(&serde_json::json!(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "textDocument/didOpen",
+                    "params": {
+                        "textDocument": {
+                            "languageId": "markdown",
+                            "text": doc,
+                            "uri": "file:///tmp/doc.md",
+                            "version":0
+                        }
+                    }
+                }
+            ))?,
+            &serde_json::to_string(&serde_json::json!(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "textDocument/completion",
+                    "params": {
+                        "position": {
+                            "character": 3,
+                            "line": doc.lines().count() - 1
+                        },
+                        "textDocument": {
+                            "uri": "file:///tmp/doc.md"
+                        }
+                    }
+                }
+            ))?,
+        ])
+        .await?;
+
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
+
+    let ls_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    // Should have 4 entries: 2 from document bibliography + 2 from fallback
+    assert_eq!(items.len(), 4);
+
+    let completions: Vec<String> = items
+        .into_iter()
+        .filter_map(|i| match i.text_edit {
+            Some(ls_types::CompletionTextEdit::InsertAndReplace(te)) => Some(te.new_text),
+            _ => None,
+        })
+        .collect();
+
+    // Verify all 4 entries are present (order may vary)
+    assert!(completions.contains(&"fa_doc_entry_1".to_string()));
+    assert!(completions.contains(&"fa_doc_entry_2".to_string()));
+    assert!(completions.contains(&"fallback_entry_1".to_string()));
+    assert!(completions.contains(&"fallback_entry_2".to_string()));
+
+    Ok(())
+}

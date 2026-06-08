@@ -31,7 +31,7 @@ $ cargo install --locked --path .
 
 You can install `simple-completion-language-server` using the [nix package manager](https://nixos.org/) from [nixpkgs](https://search.nixos.org/packages?channel=unstable&show=simple-completion-language-server&from=0&size=50&sort=relevance&type=packages&query=simple-comple).
 
-> [!NOTE]  
+> [!NOTE]
 > At the moment the package is only available on the [unstable](https://nixos.org/manual/nixpkgs/unstable/#overview-of-nixpkgs) channel of nixpkgs.
 
 ```console
@@ -158,7 +158,7 @@ simple-completion-language-server validate-snippets
 ```toml
 # first external source to load snippets
 [[sources]] # list of sources to load
-name = "source1" # optional name shown on snippet description 
+name = "source1" # optional name shown on snippet description
 git = "https://example.com/source1.git" # git repo with snippets collections
 
 [[sources.paths]] # explicit list of paths to load on current source
@@ -171,7 +171,7 @@ path = "path-in-repo/snippets2.json"
 
 # next external source to load snippets
 [[sources]]
-name = "source2"  
+name = "source2"
 git = "https://example.com/source2.git"
 
 [[sources.paths]]
@@ -186,13 +186,13 @@ Load python snippets from file https://github.com/rafamadriz/friendly-snippets/b
 File `~/.config/helix/external-snippets.toml`
 
 ```toml
-[[sources]] 
-name = "friendly-snippets"  
-git = "https://github.com/rafamadriz/friendly-snippets.git" 
+[[sources]]
+name = "friendly-snippets"
+git = "https://github.com/rafamadriz/friendly-snippets.git"
 
-[[sources.paths]] 
-scope = ["python"]  
-path = "snippets/python/python.json"  
+[[sources.paths]]
+scope = ["python"]
+path = "snippets/python/python.json"
 ```
 
 Clone or update snippets source repos to `~/.config/helix/external-snippets/<repo path>`
@@ -232,7 +232,9 @@ $ simple-completion-language-server validate-unicode-input
 Citation keys completion from bibliography file declared in current document.
 When completion is triggered with a prefixed `@` (which can be configured via `citation_prefix_trigger` settings), scls will try to extract the bibliography file path from the current document (regex can be configured via the `citation_bibfile_extract_regexp` setting) to parse and use it as a completion source.
 
-To enable this feature, scls must be compiled with the `--features citation` flag. 
+If no bibliography is found in the document, the `citation_fallback_bibfile_path` setting will be used as a fallback. This allows you to have a global bibliography file for all documents without needing to specify it in each document's frontmatter.
+
+To enable this feature, scls must be compiled with the `--features citation` flag.
 
 ```console
 $ cargo install --features citation --git https://github.com/estin/simple-completion-language-server.git
@@ -243,9 +245,12 @@ And initialize scls with `feature_citations = true`.
 ```toml
 [language-server.scls.config]
 feature_citations = true
+citation_fallback_bibfile_path = "~/references.bib"  # optional fallback
 ```
 
-For more info, please check https://github.com/estin/simple-completion-language-server/issues/78
+The fallback path supports `~` expansion to your home directory.
+
+For more info, please check #78 and #219
 
 ### Similar projects
 

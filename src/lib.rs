@@ -13,6 +13,10 @@ use tower_lsp_server::ls_types::*;
 use biblatex::Type;
 #[cfg(feature = "citation")]
 use regex_cursor::{engines::meta::Regex, Input, RopeyCursor};
+#[cfg(feature = "citation")]
+use std::cell::RefCell;
+#[cfg(feature = "citation")]
+use std::time::SystemTime;
 
 pub mod server;
 pub mod snippets;
@@ -34,6 +38,7 @@ pub struct BackendSettings {
     // citation
     pub citation_prefix_trigger: String,
     pub citation_bibfile_extract_regexp: String,
+    pub citation_fallback_bibfile_path: Option<String>,
     // feature flags
     pub feature_words: bool,
     pub feature_snippets: bool,
@@ -51,6 +56,7 @@ pub struct PartialBackendSettings {
     // citation
     pub citation_prefix_trigger: Option<String>,
     pub citation_bibfile_extract_regexp: Option<String>,
+    pub citation_fallback_bibfile_path: Option<String>,
     // feature flags
     pub feature_words: Option<bool>,
     pub feature_snippets: Option<bool>,
@@ -71,6 +77,7 @@ impl Default for BackendSettings {
             citation_prefix_trigger: "@".to_string(),
             citation_bibfile_extract_regexp: r#"bibliography:\s*['"\[]*([~\w\./\\-]*)['"\]]*"#
                 .to_string(),
+            citation_fallback_bibfile_path: None,
             feature_words: false,
             feature_snippets: true,
             feature_unicode_input: false,
@@ -93,9 +100,13 @@ impl BackendSettings {
                 .clone()
                 .unwrap_or_else(|| self.citation_prefix_trigger.to_owned()),
             citation_bibfile_extract_regexp: settings
-                .citation_prefix_trigger
+                .citation_bibfile_extract_regexp
                 .clone()
                 .unwrap_or_else(|| self.citation_bibfile_extract_regexp.to_owned()),
+            citation_fallback_bibfile_path: settings
+                .citation_fallback_bibfile_path
+                .clone()
+                .or_else(|| self.citation_fallback_bibfile_path.clone()),
             feature_words: settings.feature_words.unwrap_or(self.feature_words),
             feature_snippets: settings.feature_snippets.unwrap_or(self.feature_snippets),
             feature_unicode_input: settings
@@ -385,6 +396,8 @@ pub struct BackendState {
 
     #[cfg(feature = "citation")]
     citation_bibliography_re: Option<Regex>,
+    #[cfg(feature = "citation")]
+    citation_bib_cache: RefCell<HashMap<String, (SystemTime, String)>>,
 }
 
 impl BackendState {
@@ -407,6 +420,8 @@ impl BackendState {
                         e
                     })
                     .ok(),
+                #[cfg(feature = "citation")]
+                citation_bib_cache: RefCell::new(HashMap::new()),
 
                 settings,
                 docs: HashMap::new(),
@@ -500,9 +515,63 @@ impl BackendState {
         {
             self.citation_bibliography_re =
                 Some(Regex::new(&self.settings.citation_bibfile_extract_regexp)?);
+            // Clear cache on config change (regex or fallback path may have changed)
+            self.citation_bib_cache.borrow_mut().clear();
         };
 
         Ok(())
+    }
+
+    #[cfg(feature = "citation")]
+    fn read_bib_with_cache(&self, raw_path: &str) -> Option<biblatex::Bibliography> {
+        let path = if raw_path.contains('~') {
+            raw_path.replacen('~', &self.home_dir, 1)
+        } else {
+            raw_path.to_string()
+        };
+
+        let mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+
+        // Check cache for unchanged file
+        if let (Some(ref mtime), Some(cached)) =
+            (&mtime, self.citation_bib_cache.borrow().get(&path))
+        {
+            if *mtime == cached.0 {
+                match biblatex::Bibliography::parse(&cached.1) {
+                    Ok(bib) => return Some(bib),
+                    Err(e) => {
+                        tracing::error!("Failed to parse cached bib file {path}: {e}");
+                        // Fall through to re-read from disk
+                    }
+                }
+            }
+        }
+
+        // Read from disk
+        let bib_text = match std::fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(e) => {
+                tracing::error!("Failed to read file {path}: {e}");
+                return None;
+            }
+        };
+
+        let bib = match biblatex::Bibliography::parse(&bib_text) {
+            Ok(bib) => bib,
+            Err(e) => {
+                tracing::error!("Failed to parse bib file {path}: {e}");
+                return None;
+            }
+        };
+
+        // Update cache only if we successfully got an mtime (filesystem supports it)
+        if let Some(mtime) = mtime {
+            self.citation_bib_cache
+                .borrow_mut()
+                .insert(path, (mtime, bib_text));
+        }
+
+        Some(bib)
     }
 
     fn get_prefix(
@@ -589,7 +658,8 @@ impl BackendState {
         }
         .map(|word| {
             let line = params.text_document_position.position.line;
-            let start = params.text_document_position.position.character - prefix.chars().count() as u32;
+            let start =
+                params.text_document_position.position.character - prefix.chars().count() as u32;
             let replace_end = params.text_document_position.position.character;
             let range = Range {
                 start: Position {
@@ -639,7 +709,8 @@ impl BackendState {
             })
             .map(move |s| {
                 let line = params.text_document_position.position.line;
-                let start = params.text_document_position.position.character - prefix.chars().count() as u32;
+                let start = params.text_document_position.position.character
+                    - prefix.chars().count() as u32;
                 let replace_end = params.text_document_position.position.character;
                 let range = Range {
                     start: Position {
@@ -784,7 +855,8 @@ impl BackendState {
                     s
                 );
                 let line = params.text_document_position.position.line;
-                let start = params.text_document_position.position.character - part.chars().count() as u32;
+                let start =
+                    params.text_document_position.position.character - part.chars().count() as u32;
                 let replace_end = params.text_document_position.position.character;
                 let range = Range {
                     start: Position {
@@ -951,141 +1023,137 @@ impl BackendState {
 
         tracing::debug!("Citation word_prefix: {word_prefix}, chars_prefix: {chars_prefix}");
 
-        let Some(re) = &self.citation_bibliography_re else {
-            tracing::warn!("Citation bibliography regex empty or invalid");
-            return Vec::new().into_iter();
-        };
+        let mut seen_keys: HashSet<String> = HashSet::new();
 
-        let Some(slice) = doc.text.get_slice(..) else {
-            tracing::warn!("Failed to get rope slice");
-            return Vec::new().into_iter();
-        };
-
-        let cursor = RopeyCursor::new(slice);
-
-        for span in re
-            .captures_iter(Input::new(cursor))
-            .filter_map(|c| c.get_group(1))
-        {
-            let Some(path) = slice.get_byte_slice(span.start..span.end) else {
-                tracing::error!("Failed to get path by span");
-                continue;
-            };
-
-            // TODO any ways get &str from whole RopeSlice
-            let path = path.to_string();
-
-            let path = if path.contains("~") {
-                path.replacen('~', &self.home_dir, 1)
-            } else {
-                path
-            };
-
-            // TODO read and parse only if file changed
-            tracing::debug!("Citation try to read: {path}");
-            let bib = match std::fs::read_to_string(&path) {
-                Err(e) => {
-                    tracing::error!("Failed to read file {path}: {e}");
-                    continue;
-                }
-                Ok(r) => r,
-            };
-
-            let bib = match biblatex::Bibliography::parse(&bib) {
-                Err(e) => {
-                    tracing::error!("Failed to parse bib file {path}: {e}");
-                    continue;
-                }
-                Ok(r) => r,
-            };
-
-            items.extend(bib.iter().filter_map(|b| {
-                let matched = starts_with(&b.key, word_prefix);
-                tracing::debug!(
-                    "Citation from file: {path} prefix: {word_prefix} key: {} - match: {}",
-                    b.key,
-                    matched,
-                );
-                if !matched {
-                    return None;
-                }
-                let line = params.text_document_position.position.line;
-                let start =
-                    params.text_document_position.position.character - word_prefix.chars().count() as u32;
-                let replace_end = params.text_document_position.position.character;
-                let range = Range {
-                    start: Position {
-                        line,
-                        character: start,
-                    },
-                    end: Position {
-                        line,
-                        character: replace_end,
-                    },
-                };
-                let documentation = {
-                    let entry_type = b.entry_type.to_string();
-                    let title = b
-                        .title()
-                        .ok()?
-                        .iter()
-                        .map(|chunk| chunk.v.get())
-                        .collect::<Vec<_>>()
-                        .join("");
-                    let authors = b
-                        .author()
-                        .ok()?
-                        .into_iter()
-                        .map(|person| person.to_string())
-                        .collect::<Vec<_>>()
-                        .join(",");
-
-                    let date = match b.date() {
-                        Ok(d) => match d {
-                            biblatex::PermissiveType::Typed(date) => date.to_chunks(),
-                            biblatex::PermissiveType::Chunks(v) => v,
-                        }
-                        .iter()
-                        .map(|chunk| chunk.v.get())
-                        .collect::<Vec<_>>()
-                        .join(""),
-                        Err(e) => {
-                            tracing::error!("On parse date field on entry {b:?}: {e}");
-                            String::new()
-                        }
+        // Helper closure to process bibliography entries and add matching items
+        let mut process_bib =
+            |items: &mut Vec<CompletionItem>, bib: &biblatex::Bibliography, source: &str| {
+                items.extend(bib.iter().filter_map(|b| {
+                    if !starts_with(&b.key, word_prefix) {
+                        return None;
+                    }
+                    // Dedup across bib sources
+                    if !seen_keys.insert(b.key.to_string()) {
+                        tracing::debug!(
+                            "Citation from {source}: key {} - already seen, skipping",
+                            b.key,
+                        );
+                        return None;
+                    }
+                    tracing::debug!(
+                        "Citation from {source}: prefix: {word_prefix} key: {}",
+                        b.key,
+                    );
+                    let line = params.text_document_position.position.line;
+                    let start = params.text_document_position.position.character
+                        - word_prefix.chars().count() as u32;
+                    let replace_end = params.text_document_position.position.character;
+                    let range = Range {
+                        start: Position {
+                            line,
+                            character: start,
+                        },
+                        end: Position {
+                            line,
+                            character: replace_end,
+                        },
                     };
+                    let documentation = {
+                        let entry_type = b.entry_type.to_string();
+                        let title = b
+                            .title()
+                            .ok()?
+                            .iter()
+                            .map(|chunk| chunk.v.get())
+                            .collect::<Vec<_>>()
+                            .join("");
+                        let authors = b
+                            .author()
+                            .ok()?
+                            .into_iter()
+                            .map(|person| person.to_string())
+                            .collect::<Vec<_>>()
+                            .join(",");
 
-                    Some(format!(
-                        "# {title}\n*{authors}*\n\n{entry_type}{}",
-                        if date.is_empty() {
-                            date
-                        } else {
-                            format!(", {date}")
-                        }
-                    ))
-                };
-                Some(CompletionItem {
-                    label: format!("@{}", b.key),
-                    sort_text: Some(word_prefix.to_string()),
-                    filter_text: Some(word_prefix.to_string()),
-                    kind: Some(CompletionItemKind::REFERENCE),
-                    text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
-                        replace: range,
-                        insert: range,
-                        new_text: b.key.to_string(),
-                    })),
-                    documentation: Some(Documentation::MarkupContent(MarkupContent {
-                        kind: MarkupKind::Markdown,
+                        let date = match b.date() {
+                            Ok(d) => match d {
+                                biblatex::PermissiveType::Typed(date) => date.to_chunks(),
+                                biblatex::PermissiveType::Chunks(v) => v,
+                            }
+                            .iter()
+                            .map(|chunk| chunk.v.get())
+                            .collect::<Vec<_>>()
+                            .join(""),
+                            Err(e) => {
+                                tracing::error!("On parse date field on entry {b:?}: {e}");
+                                String::new()
+                            }
+                        };
+
+                        Some(format!(
+                            "# {title}\n*{authors}*\n\n{entry_type}{}",
+                            if date.is_empty() {
+                                date
+                            } else {
+                                format!(", {date}")
+                            }
+                        ))
+                    };
+                    Some(CompletionItem {
+                        label: format!("@{}", b.key),
+                        sort_text: Some(word_prefix.to_string()),
+                        filter_text: Some(word_prefix.to_string()),
+                        kind: Some(CompletionItemKind::REFERENCE),
+                        text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
+                            replace: range,
+                            insert: range,
+                            new_text: b.key.to_string(),
+                        })),
+                        documentation: Some(Documentation::MarkupContent(MarkupContent {
+                            kind: MarkupKind::Markdown,
                             value: documentation.unwrap_or_else(|| {
                                 format!(
                                     "'''{}'''\n\n*fallback to biblatex format*",
                                     b.to_biblatex_string()
                                 )
                             }),
-                    })),
-                    ..Default::default()
-                })
-            }));
+                        })),
+                        ..Default::default()
+                    })
+                }));
+            };
+
+        // Phase 1: Search for bibliography files mentioned in the document
+        if let Some(re) = &self.citation_bibliography_re {
+            if let Some(slice) = doc.text.get_slice(..) {
+                let cursor = RopeyCursor::new(slice);
+
+                for span in re
+                    .captures_iter(Input::new(cursor))
+                    .filter_map(|c| c.get_group(1))
+                {
+                    let Some(path) = slice.get_byte_slice(span.start..span.end) else {
+                        tracing::error!("Failed to get path by span");
+                        continue;
+                    };
+
+                    // TODO any ways get &str from whole RopeSlice
+                    let path = path.to_string();
+
+                    tracing::debug!("Citation try to read: {path}");
+                    if let Some(bib) = self.read_bib_with_cache(&path) {
+                        process_bib(&mut items, &bib, &path);
+                    }
+                }
+            }
+        }
+
+        // Phase 2: Fallback to configured citation_fallback_bibfile_path
+        if let Some(fallback_path) = &self.settings.citation_fallback_bibfile_path {
+            tracing::debug!("Citation fallback try to read: {fallback_path}");
+            if let Some(bib) = self.read_bib_with_cache(fallback_path) {
+                process_bib(&mut items, &bib, "citation_fallback_bibfile_path");
+            }
         }
 
         items.into_iter()
