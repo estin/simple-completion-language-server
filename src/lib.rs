@@ -16,6 +16,8 @@ use regex_cursor::{engines::meta::Regex, Input, RopeyCursor};
 #[cfg(feature = "citation")]
 use std::cell::RefCell;
 #[cfg(feature = "citation")]
+use std::sync::Arc;
+#[cfg(feature = "citation")]
 use std::time::SystemTime;
 
 pub mod server;
@@ -397,7 +399,7 @@ pub struct BackendState {
     #[cfg(feature = "citation")]
     citation_bibliography_re: Option<Regex>,
     #[cfg(feature = "citation")]
-    citation_bib_cache: RefCell<HashMap<String, (SystemTime, String)>>,
+    citation_bib_cache: RefCell<HashMap<String, (SystemTime, Arc<biblatex::Bibliography>)>>,
 }
 
 impl BackendState {
@@ -523,7 +525,7 @@ impl BackendState {
     }
 
     #[cfg(feature = "citation")]
-    fn read_bib_with_cache(&self, raw_path: &str) -> Option<biblatex::Bibliography> {
+    fn read_bib_with_cache(&self, raw_path: &str) -> Option<Arc<biblatex::Bibliography>> {
         let path = if raw_path.contains('~') {
             raw_path.replacen('~', &self.home_dir, 1)
         } else {
@@ -537,17 +539,12 @@ impl BackendState {
             (&mtime, self.citation_bib_cache.borrow().get(&path))
         {
             if *mtime == cached.0 {
-                match biblatex::Bibliography::parse(&cached.1) {
-                    Ok(bib) => return Some(bib),
-                    Err(e) => {
-                        tracing::error!("Failed to parse cached bib file {path}: {e}");
-                        // Fall through to re-read from disk
-                    }
-                }
+                return Some(Arc::clone(&cached.1));
             }
         }
 
         // Read from disk
+        tracing::info!("Citation try to read: {path}");
         let bib_text = match std::fs::read_to_string(&path) {
             Ok(text) => text,
             Err(e) => {
@@ -557,7 +554,7 @@ impl BackendState {
         };
 
         let bib = match biblatex::Bibliography::parse(&bib_text) {
-            Ok(bib) => bib,
+            Ok(bib) => Arc::new(bib),
             Err(e) => {
                 tracing::error!("Failed to parse bib file {path}: {e}");
                 return None;
@@ -568,7 +565,7 @@ impl BackendState {
         if let Some(mtime) = mtime {
             self.citation_bib_cache
                 .borrow_mut()
-                .insert(path, (mtime, bib_text));
+                .insert(path.clone(), (mtime, Arc::clone(&bib)));
         }
 
         Some(bib)
@@ -1041,7 +1038,7 @@ impl BackendState {
                         return None;
                     }
                     tracing::debug!(
-                        "Citation from {source}: prefix: {word_prefix} key: {}",
+                        "Citation from {source}: prefix: {chars_prefix} key: {}",
                         b.key,
                     );
                     let line = params.text_document_position.position.line;
@@ -1140,7 +1137,6 @@ impl BackendState {
                     // TODO any ways get &str from whole RopeSlice
                     let path = path.to_string();
 
-                    tracing::debug!("Citation try to read: {path}");
                     if let Some(bib) = self.read_bib_with_cache(&path) {
                         process_bib(&mut items, &bib, &path);
                     }
@@ -1150,7 +1146,6 @@ impl BackendState {
 
         // Phase 2: Fallback to configured citation_fallback_bibfile_path
         if let Some(fallback_path) = &self.settings.citation_fallback_bibfile_path {
-            tracing::debug!("Citation fallback try to read: {fallback_path}");
             if let Some(bib) = self.read_bib_with_cache(fallback_path) {
                 process_bib(&mut items, &bib, "citation_fallback_bibfile_path");
             }
