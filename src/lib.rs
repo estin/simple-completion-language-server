@@ -1059,14 +1059,16 @@ impl BackendState {
                         let entry_type = b.entry_type.to_string();
                         let title = b
                             .title()
-                            .ok()?
+                            .ok()
+                            .unwrap_or_default()
                             .iter()
                             .map(|chunk| chunk.v.get())
                             .collect::<Vec<_>>()
                             .join("");
                         let authors = b
                             .author()
-                            .ok()?
+                            .ok()
+                            .unwrap_or_default()
                             .into_iter()
                             .map(|person| person.to_string())
                             .collect::<Vec<_>>()
