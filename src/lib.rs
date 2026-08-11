@@ -37,6 +37,7 @@ pub struct BackendSettings {
     pub max_chars_prefix_len: usize,
     pub snippets_first: bool,
     pub snippets_inline_by_word_tail: bool,
+    pub case_sensitive: bool,
     // citation
     pub citation_prefix_trigger: String,
     pub citation_bibfile_extract_regexp: String,
@@ -55,6 +56,7 @@ pub struct PartialBackendSettings {
     pub max_path_chars: Option<usize>,
     pub snippets_first: Option<bool>,
     pub snippets_inline_by_word_tail: Option<bool>,
+    pub case_sensitive: Option<bool>,
     // citation
     pub citation_prefix_trigger: Option<String>,
     pub citation_bibfile_extract_regexp: Option<String>,
@@ -76,6 +78,7 @@ impl Default for BackendSettings {
             max_chars_prefix_len: 64,
             snippets_first: false,
             snippets_inline_by_word_tail: false,
+            case_sensitive: false,
             citation_prefix_trigger: "@".to_string(),
             citation_bibfile_extract_regexp: r#"bibliography:\s*['"\[]*([~\w\./\\-]*)['"\]]*"#
                 .to_string(),
@@ -97,6 +100,7 @@ impl BackendSettings {
             snippets_inline_by_word_tail: settings
                 .snippets_inline_by_word_tail
                 .unwrap_or(self.snippets_inline_by_word_tail),
+            case_sensitive: settings.case_sensitive.unwrap_or(self.case_sensitive),
             citation_prefix_trigger: settings
                 .citation_prefix_trigger
                 .clone()
@@ -131,7 +135,7 @@ pub fn char_is_char_prefix(ch: char) -> bool {
 }
 
 #[inline]
-pub fn starts_with(source: &str, s: &str) -> bool {
+pub fn starts_with_caseless(source: &str, s: &str) -> bool {
     if s.len() > source.len() {
         return false;
     }
@@ -298,9 +302,9 @@ impl std::io::Read for RopeReader<'_> {
     }
 }
 
-pub fn ac_searcher(prefix: &str) -> Result<AhoCorasick> {
+pub fn ac_searcher(prefix: &str, case_sensitive: bool) -> Result<AhoCorasick> {
     AhoCorasick::builder()
-        .ascii_case_insensitive(true)
+        .ascii_case_insensitive(!case_sensitive)
         .build([&prefix])
         .map_err(|e| anyhow::anyhow!("error {e}"))
 }
@@ -310,6 +314,7 @@ pub fn search(
     text: &Rope,
     ac: &AhoCorasick,
     result: &mut HashSet<String>,
+    case_sensitive: bool,
 ) -> Result<()> {
     let searcher = ac.try_stream_find_iter(RopeReader::new(text))?;
 
@@ -352,7 +357,12 @@ pub fn search(
 
         let item = text.slice(start_char_idx..end_char_idx);
         if let Some(item) = item.as_str() {
-            if item != prefix && starts_with(item, prefix) {
+            let matched = if case_sensitive {
+                item.starts_with(prefix)
+            } else {
+                starts_with_caseless(item, prefix)
+            };
+            if item != prefix && matched {
                 result.insert(item.to_string());
             }
         }
@@ -627,14 +637,26 @@ impl BackendState {
 
     fn completion(&self, prefix: &str, current_doc: &Document) -> Result<HashSet<String>> {
         // prepare search pattern
-        let ac = ac_searcher(prefix)?;
+        let ac = ac_searcher(prefix, self.settings.case_sensitive)?;
         let mut result = HashSet::with_capacity(100);
 
         // search in current doc at first
-        search(prefix, &current_doc.text, &ac, &mut result)?;
+        search(
+            prefix,
+            &current_doc.text,
+            &ac,
+            &mut result,
+            self.settings.case_sensitive,
+        )?;
 
         for doc in self.docs.values().filter(|doc| doc.uri != current_doc.uri) {
-            search(prefix, &doc.text, &ac, &mut result)?;
+            search(
+                prefix,
+                &doc.text,
+                &ac,
+                &mut result,
+                self.settings.case_sensitive,
+            )?;
         }
 
         Ok(result)
@@ -653,7 +675,7 @@ impl BackendState {
                 HashSet::new().into_iter()
             }
         }
-        .map(|word| {
+        .map(move |word| {
             let line = params.text_document_position.position.line;
             let start =
                 params.text_document_position.position.character - prefix.chars().count() as u32;
@@ -668,8 +690,15 @@ impl BackendState {
                     character: replace_end,
                 },
             };
+            // prioritize exact-case matches over case-insensitive-only ones
+            let exact_case = word.starts_with(prefix);
             CompletionItem {
                 label: word.clone(),
+                sort_text: Some(format!(
+                    "{}{}",
+                    if exact_case { "0" } else { "1" },
+                    word
+                )),
                 text_edit: Some(CompletionTextEdit::InsertAndReplace(InsertReplaceEdit {
                     replace: range,
                     insert: range,
@@ -702,7 +731,11 @@ impl BackendState {
                     return false;
                 }
 
-                starts_with(s.prefix.as_str(), prefix)
+                if self.settings.case_sensitive {
+                    s.prefix.starts_with(prefix)
+                } else {
+                    starts_with_caseless(s.prefix.as_str(), prefix)
+                }
             })
             .map(move |s| {
                 let line = params.text_document_position.position.line;
@@ -719,9 +752,15 @@ impl BackendState {
                         character: replace_end,
                     },
                 };
+                // prioritize exact-case matches over case-insensitive-only ones
+                let exact_case = s.prefix.starts_with(prefix);
                 CompletionItem {
                     label: s.prefix.to_owned(),
-                    sort_text: Some(s.prefix.to_string()),
+                    sort_text: Some(format!(
+                        "{}{}",
+                        if exact_case { "0" } else { "1" },
+                        s.prefix
+                    )),
                     filter_text: format!("{}{}", filter_text_prefix.unwrap_or_default(), s.prefix)
                         .into(),
                     kind: Some(CompletionItemKind::SNIPPET),
@@ -842,7 +881,7 @@ impl BackendState {
             }
 
             let items = self.unicode_input.iter().filter_map(|s| {
-                if !starts_with(&s.prefix, part) {
+                if !starts_with_caseless(&s.prefix, part) {
                     return None;
                 }
                 tracing::info!(
@@ -1026,7 +1065,7 @@ impl BackendState {
         let mut process_bib =
             |items: &mut Vec<CompletionItem>, bib: &biblatex::Bibliography, source: &str| {
                 items.extend(bib.iter().filter_map(|b| {
-                    if !starts_with(&b.key, word_prefix) {
+                    if !starts_with_caseless(&b.key, word_prefix) {
                         return None;
                     }
                     // Dedup across bib sources

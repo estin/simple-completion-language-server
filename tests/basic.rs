@@ -215,7 +215,7 @@ fn words_search() -> anyhow::Result<()> {
     let mut words = std::collections::HashSet::new();
 
     let prefix = "BTA";
-    search(prefix, &doc, &ac_searcher(prefix)?, &mut words)?;
+    search(prefix, &doc, &ac_searcher(prefix, false)?, &mut words, false)?;
     assert_eq!(
         words.iter().next().map(|v| v.as_str()),
         Some("btask_timeout")
@@ -224,8 +224,39 @@ fn words_search() -> anyhow::Result<()> {
     words.clear();
 
     let prefix = "logge";
-    search(prefix, &doc, &ac_searcher(prefix)?, &mut words)?;
+    search(prefix, &doc, &ac_searcher(prefix, false)?, &mut words, false)?;
     assert_eq!(words.iter().next().map(|v| v.as_str()), Some("loggers"));
+
+    Ok(())
+}
+
+#[test_log::test]
+fn words_search_case_sensitive() -> anyhow::Result<()> {
+    let text = "Word word";
+    let doc = ropey::Rope::from_str(text);
+    let mut words = std::collections::HashSet::new();
+
+    // case-sensitive: lowercase prefix matches only lowercase word
+    search("w", &doc, &ac_searcher("w", true)?, &mut words, true)?;
+    assert_eq!(
+        words.iter().map(|v| v.as_str()).collect::<Vec<_>>(),
+        vec!["word"]
+    );
+
+    words.clear();
+
+    // case-sensitive: uppercase prefix matches only uppercase word
+    search("W", &doc, &ac_searcher("W", true)?, &mut words, true)?;
+    assert_eq!(
+        words.iter().map(|v| v.as_str()).collect::<Vec<_>>(),
+        vec!["Word"]
+    );
+
+    words.clear();
+
+    // case-insensitive (default): both match
+    search("w", &doc, &ac_searcher("w", false)?, &mut words, false)?;
+    assert_eq!(words.len(), 2);
 
     Ok(())
 }
@@ -301,6 +332,90 @@ async fn completion() -> anyhow::Result<()> {
     };
 
     assert_eq!(items.len(), 0);
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn completion_case_sensitive() -> anyhow::Result<()> {
+    let mut context = TestContext::default();
+    context.initialize().await?;
+
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "feature_words": true,
+                    "case_sensitive": true,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
+    // "he" must not match "Hello" when case-sensitive
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"Hello\nhe","uri":"file:///tmp/main.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":1},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
+
+    let ls_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(items.len(), 0);
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn completion_prioritizes_exact_case() -> anyhow::Result<()> {
+    let mut context = TestContext::default();
+    context.initialize().await?;
+
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "feature_words": true,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
+    // both "Hello" and "hello" match "he", but "hello" is an exact-case match
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"Hello hello\nhe","uri":"file:///tmp/main.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":2,"line":1},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
+
+    let ls_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    let mut sorted: Vec<(String, String)> = items
+        .into_iter()
+        .filter_map(|i| i.sort_text.map(|s| (s, i.label)))
+        .collect();
+    sorted.sort();
+
+    // exact-case match ("hello") sorts before case-insensitive-only match ("Hello")
+    assert_eq!(
+        sorted,
+        vec![
+            ("0hello".to_string(), "hello".to_string()),
+            ("1Hello".to_string(), "Hello".to_string()),
+        ]
+    );
 
     Ok(())
 }
@@ -385,6 +500,127 @@ async fn snippets() -> anyhow::Result<()> {
             .collect::<Vec<_>>(),
         vec!["def main(): pass"]
     );
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn snippets_prioritize_exact_case() -> anyhow::Result<()> {
+    let mut context = TestContext::new(
+        vec![
+            snippets::Snippet {
+                scope: None,
+                prefix: "TODO".to_string(),
+                body: "TODO".to_string(),
+                description: None,
+            },
+            snippets::Snippet {
+                scope: None,
+                prefix: "tod".to_string(),
+                body: "tod".to_string(),
+                description: None,
+            },
+        ],
+        Default::default(),
+        Default::default(),
+    );
+    context.initialize().await?;
+
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "snippets_first": true,
+                    "snippets_inline_by_word_tail": false,
+                    "feature_snippets": true,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
+    // both "TODO" and "tod" match "tod", but "tod" is an exact-case match
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"tod","uri":"file:///tmp/main.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":3,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
+
+    let ls_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    let mut sorted: Vec<(String, String)> = items
+        .into_iter()
+        .filter_map(|i| i.sort_text.map(|s| (s, i.label)))
+        .collect();
+    sorted.sort();
+
+    assert_eq!(
+        sorted,
+        vec![
+            ("0tod".to_string(), "tod".to_string()),
+            ("1TODO".to_string(), "TODO".to_string()),
+        ]
+    );
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
+async fn snippets_case_sensitive() -> anyhow::Result<()> {
+    let mut context = TestContext::new(
+        vec![snippets::Snippet {
+            scope: None,
+            prefix: "TODO".to_string(),
+            body: "TODO body".to_string(),
+            description: None,
+        }],
+        Default::default(),
+        Default::default(),
+    );
+    context.initialize().await?;
+
+    let request = jsonrpc::Request::from_str(&serde_json::to_string(&serde_json::json!(
+        {
+            "jsonrpc": "2.0",
+            "method": "workspace/didChangeConfiguration",
+            "params": {
+                "settings": {
+                    "feature_snippets": true,
+                    "case_sensitive": true,
+                }
+            }
+        }
+    ))?)?;
+    context.send(&request).await?;
+
+    // lowercase "tod" must not match snippet "TODO" when case-sensitive
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"tod","uri":"file:///tmp/main.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":3,"line":0},"textDocument":{"uri":"file:///tmp/main.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
+    let ls_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+    assert_eq!(items.len(), 0);
+
+    // exact-case "TODO" does match
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"python","text":"TODO","uri":"file:///tmp/main2.py","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":4,"line":0},"textDocument":{"uri":"file:///tmp/main2.py"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
+    let ls_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+    assert_eq!(items.len(), 1);
 
     Ok(())
 }
