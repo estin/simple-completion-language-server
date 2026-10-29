@@ -505,6 +505,52 @@ async fn snippets() -> anyhow::Result<()> {
 }
 
 #[test_log::test(tokio::test)]
+async fn did_change_full_document_replacement() -> anyhow::Result<()> {
+    // Kakoune-lsp sends the full document text on every didChange, with no range.
+    // Per the LSP spec that means the whole document is replaced, so the server
+    // must update its copy instead of skipping the change.
+    let mut context = TestContext::new(
+        vec![snippets::Snippet {
+            scope: Some(vec!["fortran".to_string()]),
+            prefix: "do".to_string(),
+            body: "do i = 1, n".to_string(),
+            description: None,
+        }],
+        Default::default(),
+        Default::default(),
+    );
+    context.initialize().await?;
+
+    // didOpen does not contain the "do" line; didChange then replaces the whole
+    // document with one that does. Without the fix, the "do" line is lost and
+    // completion returns nothing.
+    context.send_all(&[
+        r#"{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"languageId":"fortran","text":"program p\n  implicit none\n  integer :: i\nend program p\n","uri":"file:///tmp/main.f90","version":0}}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":"file:///tmp/main.f90","version":1},"contentChanges":[{"text":"program p\n  implicit none\n  integer :: i\n  do\nend program p\n"}]}}"#,
+        r#"{"jsonrpc":"2.0","method":"textDocument/completion","params":{"position":{"character":3,"line":3},"textDocument":{"uri":"file:///tmp/main.f90"}},"id":3}"#
+    ]).await?;
+
+    let response = context.recv::<ls_types::CompletionResponse>().await?;
+
+    let ls_types::CompletionResponse::Array(items) = response else {
+        anyhow::bail!("completion array expected")
+    };
+
+    assert_eq!(
+        items
+            .into_iter()
+            .filter_map(|i| i.text_edit.and_then(|l| match l {
+                ls_types::CompletionTextEdit::InsertAndReplace(t) => Some(t.new_text),
+                _ => None,
+            }))
+            .collect::<Vec<_>>(),
+        vec!["do i = 1, n"]
+    );
+
+    Ok(())
+}
+
+#[test_log::test(tokio::test)]
 async fn snippets_prioritize_exact_case() -> anyhow::Result<()> {
     let mut context = TestContext::new(
         vec![

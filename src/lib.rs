@@ -480,7 +480,11 @@ impl BackendState {
             return Ok(());
         };
         for change in params.clone().content_changes {
-            let Some(range) = change.range else { continue };
+            // No range means the whole document was sent (full sync, e.g. kak-lsp).
+            let Some(range) = change.range else {
+                doc.text = Rope::from_str(&change.text);
+                continue;
+            };
             let start_idx = doc
                 .text
                 .try_line_to_char(range.start.line as usize)
